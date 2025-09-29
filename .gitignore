@@ -1,0 +1,117 @@
+# ---- Python ----
+__pycache__/
+*.py[cod]
+*$py.class
+
+# C extensions
+*.so
+
+# Virtual environments
+.venv/
+venv/
+ENV/
+env/
+.conda/
+conda_env/
+
+# Packaging
+build/
+dist/
+*.egg-info/
+.eggs/
+*.egg
+pip-wheel-metadata/
+
+# PyInstaller
+*.spec
+
+# Logs and debug
+logs/
+*.log
+*.out
+*.err
+
+# Jupyter and notebooks
+.ipynb_checkpoints/
+.profile
+
+# Coverage and testing
+.coverage
+.coverage.*
+.cache/
+nosetests.xml
+coverage.xml
+*.cover
+*.py,cover
+.hypothesis/
+.pytest_cache/
+.tox/
+.mypy_cache/
+.pyre/
+.pytype/
+
+# Linting
+.pylint.d/
+
+# ---- Data & Artifacts ----
+# Datasets (ignore contents)
+dataset/**
+!dataset/.gitkeep
+splitted_dataset/**
+!splitted_dataset/.gitkeep
+
+# Model weights and artifacts
+checkpoints/
+outputs/
+artifacts/
+models/
+*.pth
+*.pt
+*.onnx
+*.ckpt
+*.tflite
+*.h5
+*.pb
+
+# Training runs
+runs/
+wandb/
+mlruns/
+lightning_logs/
+
+# Intermediate files
+.tmp/
+/tmp/
+**/*.tmp
+
+# ---- IDE / Editor ----
+# VSCode
+.vscode/
+.code-workspace
+
+# PyCharm/IntelliJ
+.idea/
+*.iml
+
+# Other editors
+*.swp
+*.swo
+
+# ---- OS / Misc ----
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# ---- Project-specific ----
+# Exports
+exports/
+
+# Ignore Grad-CAM output images if generated
+gradcam_output/
+
+# If you export requirements locks
+poetry.lock
+Pipfile.lock
+
+# If using git-lfs later, keep patterns here (commented)
+# *.bin filter=lfs diff=lfs merge=lfs -text

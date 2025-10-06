@@ -4,7 +4,17 @@ from src.utils import plot_confusion_matrix, plot_roc_curve, plot_precision_reca
 from src.gradcam import analyze_model_gradcam
 import os
 
-def evaluate_model(model, test_ds, plots_dir=None, class_names=['Not Drowsy', 'Drowsy'], subject_diverse_dir=None, misclassified_only=False, ds_name="test"):
+def evaluate_model(
+    model,
+    test_ds,
+    plots_dir=None,
+    class_names=['Not Drowsy', 'Drowsy'],
+    subject_diverse_dir=None,
+    misclassified_only=False,
+    ds_name="test",
+    num_gradcam_samples=10,
+    confusion=True
+):
     """
     Evaluate model performance on test dataset
     """
@@ -49,15 +59,17 @@ def evaluate_model(model, test_ds, plots_dir=None, class_names=['Not Drowsy', 'D
     
     # 6) Generate GradCAM visualizations for explainability
     print("Generating GradCAM visualizations...")
-    gradcam_dir = os.path.join(plots_dir, f"{ds_name}_gradcam") if plots_dir else f"{ds_name}_  gradcam_results"
+    gradcam_dir = os.path.join(plots_dir, f"{ds_name}_gradcam") if plots_dir else f"{ds_name}_gradcam_results"
+    os.makedirs(gradcam_dir, exist_ok=True)
     analyze_model_gradcam(
         model,
         test_ds,
-        num_samples=10,
+        num_samples=num_gradcam_samples,
         output_dir=gradcam_dir,
         class_names=tuple(class_names),
         subject_diverse_dir=subject_diverse_dir,
-        misclassified_only=misclassified_only
+        misclassified_only=misclassified_only,
+        confusion=confusion
     )
     
     # 7) Return metrics for further analysis

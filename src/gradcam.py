@@ -6,6 +6,12 @@ import tensorflow as tf
 import matplotlib.pyplot as plt
 from tensorflow.keras.models import Model
 from tensorflow.keras.layers import Conv2D
+try:
+    # Optional conv variants
+    from tensorflow.keras.layers import SeparableConv2D, DepthwiseConv2D
+except Exception:  # pragma: no cover
+    SeparableConv2D = tuple()  # type: ignore
+    DepthwiseConv2D = tuple()  # type: ignore
 import os
 import re
 
@@ -73,8 +79,14 @@ class GradCAM:
         # Pick last Conv2D layer if not provided
         self.layer_name = layer_name
         if self.layer_name is None:
+            # Prefer last conv-like layer (Conv2D/Separable/Depthwise)
+            conv_types = (Conv2D,)
+            try:
+                conv_types = (Conv2D, SeparableConv2D, DepthwiseConv2D)
+            except Exception:
+                pass
             for layer in reversed(self.model.layers):
-                if isinstance(layer, Conv2D):
+                if isinstance(layer, conv_types):
                     self.layer_name = layer.name
                     break
 
@@ -104,7 +116,8 @@ class GradCAM:
             h = 7 if image.shape[1] >= 7 else image.shape[1]
             w = 7 if image.shape[2] >= 7 else image.shape[2]
             heatmap = np.random.rand(h, w)
-            heatmap = heatmap / np.max(heatmap)
+            heatmap = heatmap / (np.max(heatmap) + 1e-8)
+            print("[GradCAM] Warning: Using fallback (dummy) heatmap. Could not build grad model for layer:", self.layer_name)
             return heatmap, prediction
 
         with tf.GradientTape() as tape:
@@ -123,6 +136,11 @@ class GradCAM:
 
         grads = tape.gradient(class_output, conv_outputs)
         # Global average pooling over H,W
+        # Support possible time dimension: (B,T,H,W,C)
+        if len(conv_outputs.shape) == 5:
+            # take last time-step features
+            conv_outputs = conv_outputs[:, -1]
+            grads = grads[:, -1]
         pooled_grads = tf.reduce_mean(grads, axis=(0, 1, 2))
         conv_outputs = conv_outputs[0]  # (H, W, C)
 
@@ -214,121 +232,157 @@ class GradCAM:
         return fig, prediction
 
 
-def analyze_model_gradcam(model, test_ds, num_samples=5, output_dir="gradcam_results",
-                          class_names=('Not Drowsy', 'Drowsy'), threshold=0.5,
-                          subject_diverse_dir=None, misclassified_only=False):
+def analyze_model_gradcam(model, test_ds, num_samples=10, output_dir="gradcam_results",
+                         class_names=('Not Drowsy', 'Drowsy'), threshold=0.5,
+                         subject_diverse_dir=None, misclassified_only=False,
+                         confusion=False, max_per_category=10,
+                         confusion_limit=False):
     """
     Analyze model with GradCAM on samples from test_ds.
-    Handles binary sigmoid outputs and 2-class softmax models.
+    Supports:
+      - confusion=True: saves TP/TN/FP/FN folders.
+      - misclassified_only=True: saves only FP/FN up to max_per_category each.
+      - confusion_limit=True: applies max_per_category limit to each confusion bucket.
+    Gracefully handles cases with fewer available samples.
     """
-    # If we want to keep misclassified separate, write under a subfolder
-    if misclassified_only:
-        output_dir = os.path.join(output_dir, 'misclassified')
+
+    # Prepare output folders
     os.makedirs(output_dir, exist_ok=True)
+    if confusion:
+        for sub in ("TP", "TN", "FP", "FN"):
+            os.makedirs(os.path.join(output_dir, sub), exist_ok=True)
+    elif misclassified_only:
+        for sub in ("FP", "FN"):
+            os.makedirs(os.path.join(output_dir, sub), exist_ok=True)
+
     gradcam = GradCAM(model)
     sample_count = 0
 
-    if subject_diverse_dir is not None:
-        # Prefer diversity: sample at most one image per subject from the directory
-        subj_re = re.compile(r"^([A-Za-z]+)")
-        def _subj_from_name(path: str):
-            name = os.path.splitext(os.path.basename(path))[0]
-            m = subj_re.match(name)
-            return m.group(1).lower() if m else None
+    # Counters for each category
+    fp_saved, fn_saved, tp_saved, tn_saved = 0, 0, 0, 0
 
-        # Collect examples per subject across class subfolders
-        subj_to_examples = {}
-        for cls_idx, cls_name in enumerate(["NotDrowsy", "Drowsy"]):
-            cls_dir = os.path.join(subject_diverse_dir, cls_name)
-            if not os.path.isdir(cls_dir):
+    for batch_images, batch_labels in test_ds:
+        # Stop early if all requested categories reached their limits
+        if misclassified_only and fp_saved >= max_per_category and fn_saved >= max_per_category:
+            break
+        if confusion and confusion_limit and all([
+            tp_saved >= max_per_category,
+            tn_saved >= max_per_category,
+            fp_saved >= max_per_category,
+            fn_saved >= max_per_category
+        ]):
+            break
+        if not misclassified_only and not confusion and sample_count >= num_samples:
+            break
+
+        batch_preds = model.predict(batch_images, verbose=0)
+
+        for i in range(len(batch_images)):
+            image = batch_images[i].numpy()
+            true_idx = _to_class_index(batch_labels[i].numpy())
+
+            local_pred = batch_preds[i:i+1]
+            prob_local, pred_idx_local = _pred_to_prob_and_class(local_pred)
+
+            # Determine confusion matrix category
+            if int(true_idx) == 1 and pred_idx_local == 1:
+                bucket = "TP"
+            elif int(true_idx) == 0 and pred_idx_local == 0:
+                bucket = "TN"
+            elif int(true_idx) == 0 and pred_idx_local == 1:
+                bucket = "FP"
+            else:
+                bucket = "FN"
+
+            # Skip non-misclassified if requested
+            if misclassified_only and bucket not in ("FP", "FN"):
                 continue
-            for fname in os.listdir(cls_dir):
-                fpath = os.path.join(cls_dir, fname)
-                if not os.path.isfile(fpath):
-                    continue
-                subj = _subj_from_name(fpath)
-                if subj is None:
-                    continue
-                subj_to_examples.setdefault(subj, []).append((fpath, cls_idx))
 
-        # Shuffle subjects deterministically
-        rng = np.random.default_rng(42)
-        subjects = list(subj_to_examples.keys())
-        rng.shuffle(subjects)
+            # Apply per-category limits (for misclassified or confusion_limit modes)
+            if misclassified_only or (confusion and confusion_limit):
+                if bucket == "FP" and fp_saved >= max_per_category:
+                    continue
+                if bucket == "FN" and fn_saved >= max_per_category:
+                    continue
+                if confusion_limit:
+                    if bucket == "TP" and tp_saved >= max_per_category:
+                        continue
+                    if bucket == "TN" and tn_saved >= max_per_category:
+                        continue
 
-        for subj in subjects:
-            if sample_count >= num_samples:
+            # Stop entirely if general limit reached
+            if not misclassified_only and not confusion and sample_count >= num_samples:
                 break
-            examples = subj_to_examples[subj]
-            fpath, true_idx = examples[rng.integers(0, len(examples))]
 
-            # Load and preprocess similar to dataset (resize + scale)
-            img = tf.keras.utils.load_img(fpath, target_size=(224, 224))
-            img_arr = tf.keras.utils.img_to_array(img) / 255.0
-
-            # Optionally filter to misclassified only
-            if misclassified_only:
-                pred_vec = model.predict(img_arr[None, ...], verbose=0)
-                _, pred_idx = _pred_to_prob_and_class(pred_vec)
-                if pred_idx == int(true_idx):
-                    continue
+            # Compute GradCAM
+            target_class = None
+            if np.array(batch_preds).ndim == 2 and np.array(batch_preds).shape[1] == 2:
+                target_class = 1  # explain "Drowsy" class
 
             fig, pred_vec = gradcam.visualize(
-                img_arr,
+                image,
                 class_names=class_names,
                 threshold=threshold,
-                target_class=None,
+                target_class=target_class,
                 true_class_idx=true_idx,
-                save_path=os.path.join(output_dir, f'sample_{sample_count:02d}.png')
+                save_path=None
             )
 
             prob, pred_idx = _pred_to_prob_and_class(pred_vec)
-            print(
-                f"Sample {sample_count:02d} (subj={subj}): "
-                f"True={class_names[true_idx]}, Pred={class_names[pred_idx]} ({prob:.3f})"
-            )
 
+            # Save visualization
+            save_folder = os.path.join(output_dir, bucket if (confusion or misclassified_only) else "")
+            os.makedirs(save_folder, exist_ok=True)
+            save_path = os.path.join(save_folder, f'sample_{sample_count:03d}.png')
+            fig.savefig(save_path, dpi=300, bbox_inches='tight')
             plt.close(fig)
+
+            print(f"Sample {sample_count:03d}: True={class_names[true_idx]}, "
+                  f"Pred={class_names[pred_idx]} ({prob:.3f}) -> {bucket}")
+
+            # Update counters
+            if bucket == "FP":
+                fp_saved += 1
+            elif bucket == "FN":
+                fn_saved += 1
+            elif bucket == "TP":
+                tp_saved += 1
+            elif bucket == "TN":
+                tn_saved += 1
+
             sample_count += 1
+
+        # Break outer loop if limits reached
+        if misclassified_only and fp_saved >= max_per_category and fn_saved >= max_per_category:
+            break
+        if confusion and confusion_limit and all([
+            tp_saved >= max_per_category,
+            tn_saved >= max_per_category,
+            fp_saved >= max_per_category,
+            fn_saved >= max_per_category
+        ]):
+            break
+
+    # Summary reporting
+    if misclassified_only:
+        print("\n--- Misclassified Summary ---")
+        print(f"FP saved: {fp_saved}/{max_per_category}")
+        print(f"FN saved: {fn_saved}/{max_per_category}")
+        if fp_saved == 0 and fn_saved == 0:
+            print("⚠️ No FP or FN samples found.")
+        else:
+            if fp_saved < max_per_category:
+                print(f"ℹ️ Only {fp_saved} FP samples found (requested {max_per_category}).")
+            if fn_saved < max_per_category:
+                print(f"ℹ️ Only {fn_saved} FN samples found (requested {max_per_category}).")
+    elif confusion and confusion_limit:
+        print("\n--- Confusion Matrix Summary ---")
+        print(f"TP saved: {tp_saved}/{max_per_category}")
+        print(f"TN saved: {tn_saved}/{max_per_category}")
+        print(f"FP saved: {fp_saved}/{max_per_category}")
+        print(f"FN saved: {fn_saved}/{max_per_category}")
+        print(f"✅ GradCAM (confusion_limit mode) complete! Results saved in: {output_dir}/")
     else:
-        for batch_images, batch_labels in test_ds:
-            if sample_count >= num_samples:
-                break
+        print(f"\n✅ GradCAM analysis complete! Results saved in: {output_dir}/")
 
-            # Predict batch once for logging (optional; GradCAM does its own forward pass anyway)
-            batch_preds = model.predict(batch_images, verbose=0)
 
-            for i in range(len(batch_images)):
-                if sample_count >= num_samples:
-                    break
-
-                image = batch_images[i].numpy()
-                true_idx = _to_class_index(batch_labels[i].numpy())
-                # Compute per-sample prediction to optionally filter misclassified
-                local_pred = batch_preds[i:i+1]
-                prob_local, pred_idx_local = _pred_to_prob_and_class(local_pred)
-                if misclassified_only and pred_idx_local == int(true_idx):
-                    continue
-                target_class = None
-                if np.array(batch_preds).ndim == 2 and np.array(batch_preds).shape[1] == 2:
-                    target_class = 1  # explain "Drowsy"
-
-                fig, pred_vec = gradcam.visualize(
-                    image,
-                    class_names=class_names,
-                    threshold=threshold,
-                    target_class=target_class,
-                    true_class_idx=true_idx,
-                    save_path=os.path.join(output_dir, f'sample_{sample_count:02d}.png')
-                )
-
-                prob, pred_idx = _pred_to_prob_and_class(pred_vec)
-                print(
-                    f"Sample {sample_count:02d}: "
-                    f"True={class_names[true_idx]}, Pred={class_names[pred_idx]} ({prob:.3f})"
-                )
-
-                plt.close(fig)
-                sample_count += 1
-
-    print(f"GradCAM analysis complete! Results saved in: {output_dir}/")

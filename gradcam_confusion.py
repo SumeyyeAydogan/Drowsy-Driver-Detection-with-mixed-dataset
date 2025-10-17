@@ -76,35 +76,19 @@ class GradCAM:
             dummy_input = tf.random.normal((1, 224, 224, 3))
             _ = self.model(dummy_input, training=False)
 
-        # Pick conv layer if not provided, prefer higher spatial resolution
+        # Pick last Conv2D layer if not provided
         self.layer_name = layer_name
         if self.layer_name is None:
-            # Prefer last conv-like layer (Conv2D/Separable/Depthwise) with spatial size >= 14
+            # Prefer last conv-like layer (Conv2D/Separable/Depthwise)
             conv_types = (Conv2D,)
             try:
                 conv_types = (Conv2D, SeparableConv2D, DepthwiseConv2D)
             except Exception:
                 pass
-
-            preferred = None
-            fallback = None
-            for layer in self.model.layers:
+            for layer in reversed(self.model.layers):
                 if isinstance(layer, conv_types):
-                    # Get spatial dims if available
-                    out_shape = getattr(layer, 'output_shape', None)
-                    if out_shape is None:
-                        try:
-                            out_shape = layer.output.shape
-                        except Exception:
-                            out_shape = None
-                    if out_shape is not None and len(out_shape) >= 3:
-                        h = int(out_shape[-3]) if out_shape[-3] is not None else -1
-                        w = int(out_shape[-2]) if out_shape[-2] is not None else -1
-                        if h >= 14 and w >= 14:
-                            preferred = layer.name  # keep last meeting criterion
-                    fallback = layer.name  # keep last conv as fallback
-
-            self.layer_name = preferred or fallback
+                    self.layer_name = layer.name
+                    break
 
         # Create grad model (conv outputs + final outputs)
         try:
@@ -178,7 +162,7 @@ class GradCAM:
         heatmap_tf = tf.convert_to_tensor(heatmap, dtype=tf.float32)
         heatmap_tf = heatmap_tf[None, ..., None]  # (1,H,W,1)
         H, W = int(image.shape[0]), int(image.shape[1])
-        heatmap_resized = tf.image.resize(heatmap_tf, (H, W), method='bicubic', antialias=True)[0, ..., 0].numpy()
+        heatmap_resized = tf.image.resize(heatmap_tf, (H, W), method='bilinear')[0, ..., 0].numpy()
 
         # Normalize to [0,1]
         heatmap_norm = np.clip(heatmap_resized, 0.0, 1.0)
@@ -278,7 +262,7 @@ def analyze_model_gradcam(model, test_ds, num_samples=10, output_dir="gradcam_re
     # Counters for each category
     fp_saved, fn_saved, tp_saved, tn_saved = 0, 0, 0, 0
     batch_count = 0
-    max_batches_to_check = 5  # Maksimum 50 batch kontrol et
+    max_batches_to_check = 50  # Maksimum 50 batch kontrol et
 
     for batch_data in test_ds:
         batch_count += 1

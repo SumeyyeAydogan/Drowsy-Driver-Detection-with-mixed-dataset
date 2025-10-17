@@ -128,9 +128,22 @@ def plot_history(history, save_path=None):
     
     # Accuracy plot
     plt.subplot(1, 2, 1)
-    plt.plot(history.history['accuracy'], label='Train')
-    if 'val_accuracy' in history.history:
-        plt.plot(history.history['val_accuracy'], label='Validation')
+    # Check for different accuracy metric names
+    acc_key = None
+    val_acc_key = None
+    
+    # Look for accuracy metrics (could be 'accuracy', 'weighted_accuracy', etc.)
+    for key in history.history.keys():
+        if key == 'accuracy' or key.endswith('_accuracy'):
+            acc_key = key
+        elif key == 'val_accuracy' or key.endswith('_val_accuracy'):
+            val_acc_key = key
+    
+    if acc_key:
+        plt.plot(history.history[acc_key], label='Train')
+    if val_acc_key:
+        plt.plot(history.history[val_acc_key], label='Validation')
+    
     plt.title('Accuracy')
     plt.xlabel('Epoch')
     plt.ylabel('Accuracy')
@@ -159,19 +172,38 @@ def plot_history(history, save_path=None):
 
 def plot_metrics(history, save_path=None):
     """Plot additional metrics: precision, recall, auc"""
+    # Look for metrics with different naming patterns
     metrics = ['precision', 'recall', 'auc']
-    available_metrics = [m for m in metrics if m in history.history]
+    available_metrics = []
+    
+    # Check for different metric naming patterns
+    for metric in metrics:
+        # Look for exact match or weighted version
+        for key in history.history.keys():
+            if key == metric or key.endswith(f'_{metric}') or key.startswith(f'{metric}_'):
+                available_metrics.append((metric, key))
+                break
     
     if not available_metrics:
         print("No additional metrics found in history")
+        print(f"Available keys: {list(history.history.keys())}")
         return
     
     plt.figure(figsize=(15, 5))
-    for i, metric in enumerate(available_metrics):
+    for i, (metric, key) in enumerate(available_metrics):
         plt.subplot(1, len(available_metrics), i+1)
-        plt.plot(history.history[metric], label=f'Train {metric}')
-        if f'val_{metric}' in history.history:
-            plt.plot(history.history[f'val_{metric}'], label=f'Val {metric}')
+        plt.plot(history.history[key], label=f'Train {metric}')
+        
+        # Look for validation version
+        val_key = None
+        for val_key_candidate in history.history.keys():
+            if val_key_candidate == f'val_{metric}' or val_key_candidate.endswith(f'_val_{metric}') or val_key_candidate.startswith(f'val_{metric}_'):
+                val_key = val_key_candidate
+                break
+        
+        if val_key:
+            plt.plot(history.history[val_key], label=f'Val {metric}')
+        
         plt.title(f'{metric.upper()}')
         plt.xlabel('Epoch')
         plt.ylabel(metric.upper())

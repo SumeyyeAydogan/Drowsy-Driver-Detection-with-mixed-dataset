@@ -10,7 +10,7 @@ from src.evaluate        import evaluate_model
 from src.export          import save_model
 from src.run_manager     import RunManager
 from src.callbacks       import get_training_callbacks
-
+import splitfolders
 
 if __name__ == "__main__":
     print("🚀 Starting Drowsy Driver Detection Project...")
@@ -32,23 +32,25 @@ if __name__ == "__main__":
 
     # 3) Create Train/Val/Test folder hierarchy
     #    raw_dir contains => drowsy, notdrowsy
-    split_dataset(raw_dir, output_dir, classes=("NotDrowsy", "Drowsy"), seed=42)
+    #split_dataset(raw_dir, output_dir, classes=("NotDrowsy", "Drowsy"), seed=42)
+    #splitfolders.ratio(raw_dir, output=output_dir, seed=1337, ratio=(.8, 0.15, 0.05))
 
     # 4) Create run manager
     print("📁 Creating run manager...")
-    run_manager = RunManager("20_epoch")
+    run_manager = RunManager("3_epoch_lib_sample-weight")
     print(f"✅ Run manager created: {run_manager.run_dir}")
 
     # 5) tf.data pipelines
     # LOADER (binary: NotDrowsy=0, Drowsy=1)
-    print("🔄 Loading datasets (new binary pipeline)...")
+    print("🔄 Loading datasets (new binary pipeline with eye-mouth masks)...")
     train_ds, val_ds, test_ds, class_names = get_binary_pipelines(
         output_dir,
         img_size=(224, 224),
-        batch_size=32,
-        seed=42
+        batch_size=8,
+        seed=42,
+        use_masks=True  # Enable eye-mouth focused masks
     )
-    print("✅ Datasets loaded successfully!")
+    print("✅ Datasets loaded successfully with eye-mouth masks!")
 
     # 5.1) Plot dataset distribution
     print("📊 Analyzing dataset distribution...")
@@ -72,7 +74,7 @@ if __name__ == "__main__":
         print("🆕 Starting training from scratch")
     
     # 7) Save initial config
-    epoch_count=20
+    epoch_count=3
     config = {
         "run_name": run_manager.run_name,
         "epochs": epoch_count,
@@ -95,14 +97,17 @@ if __name__ == "__main__":
     # Get all training callbacks (custom + standard Keras callbacks)
     callbacks = get_training_callbacks(run_manager)
     
-    # Train the model
+    # Train the model with eye-mouth focused loss
     history = train_model(
         model, 
         train_ds, 
         val_ds, 
         epochs=epoch_count,
         callbacks=callbacks,  # Add all callbacks
-        initial_epoch=initial_epoch  # Resume from checkpoint if available
+        initial_epoch=initial_epoch,  # Resume from checkpoint if available
+        use_gradient_loss=False,  # Use sample_weight approach for better integration
+        lambda_grad=0.1,  # Weight for gradient penalty
+        target_layer_name="conv2d_2"  # Target intermediate layer for gradient computation
     )
     print("✅ Training completed!")
 
@@ -124,7 +129,7 @@ if __name__ == "__main__":
         train_ds,
         plots_dir=train_plots_dir,
         subject_diverse_dir=os.path.join(output_dir, "train"),
-        misclassified_only=True,
+        #misclassified_only=True,
         ds_name="train"
     )
     print("✅ Training evaluation completed!")

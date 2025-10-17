@@ -18,7 +18,7 @@ def main():
     print("=" * 40)
     
     # Adjustable parameters
-    NUM_SAMPLES = 12          # Target number of examples to visualize
+    NUM_SAMPLES = 5          # Target number of examples to visualize
     MISCLASSIFIED_ONLY = False # If True, only show misclassified samples
 
     # Repository paths
@@ -43,7 +43,7 @@ def main():
     # 2. Load dataset
     print("2. Loading test dataset...")
     try:
-        train_ds, val_ds, test_ds, class_names = get_binary_pipelines(dataset_root)
+        train_ds, val_ds, test_ds, class_names = get_binary_pipelines(dataset_root, use_masks=True)
         print("✅ Test dataset loaded successfully")
     except Exception as e:
         print(f"❌ Error loading dataset: {e}")
@@ -51,7 +51,16 @@ def main():
     
     # 3. Single image GradCAM example
     print("3. Running single image GradCAM example...")
-    for batch_images, batch_labels in test_ds.take(1):
+    for batch in train_ds.take(1):
+        if isinstance(batch, (list, tuple)):
+            if len(batch) == 2:
+                batch_images, batch_labels = batch
+            elif len(batch) == 3:
+                batch_images, batch_labels, _ = batch
+            else:
+                raise ValueError(f"Unexpected batch format: {len(batch)} elements")
+        else:
+            raise ValueError("Unexpected batch type; expected (x,y) or (x,y,sample_weight)")
         sample_image = batch_images[0].numpy()
         true_label = int(batch_labels[0].numpy())
         break

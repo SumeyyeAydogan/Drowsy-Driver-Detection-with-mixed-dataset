@@ -1,7 +1,8 @@
 import numpy as np
 from sklearn.metrics import classification_report
 from src.utils import plot_confusion_matrix, plot_roc_curve, plot_precision_recall_curve
-from src.gradcam import analyze_model_gradcam
+#from src.gradcam import analyze_model_gradcam
+from src.gradcam_without_conf import analyze_model_gradcam
 import os
 
 def evaluate_model(
@@ -12,8 +13,8 @@ def evaluate_model(
     subject_diverse_dir=None,
     misclassified_only=False,
     ds_name="test",
-    num_gradcam_samples=10,
-    confusion=True
+    #num_gradcam_samples=10,
+    #confusion=True
 ):
     """
     Evaluate model performance on test dataset
@@ -23,7 +24,15 @@ def evaluate_model(
     y_pred = []
     y_pred_proba = []
     
-    for x_batch, y_batch in test_ds:
+    for batch_data in test_ds:
+        # Handle both formats: (x, y) or (x, y, sample_weight)
+        if len(batch_data) == 2:
+            x_batch, y_batch = batch_data
+        elif len(batch_data) == 3:
+            x_batch, y_batch, sample_weight = batch_data
+        else:
+            raise ValueError(f"Unexpected batch format: {len(batch_data)} elements")
+        
         # Get predictions
         preds = model.predict(x_batch, verbose=0)
         
@@ -64,12 +73,12 @@ def evaluate_model(
     analyze_model_gradcam(
         model,
         test_ds,
-        num_samples=num_gradcam_samples,
+        #num_samples=num_gradcam_samples,
         output_dir=gradcam_dir,
         class_names=tuple(class_names),
         subject_diverse_dir=subject_diverse_dir,
         misclassified_only=misclassified_only,
-        confusion=confusion
+        #confusion=confusion
     )
     
     # 7) Return metrics for further analysis

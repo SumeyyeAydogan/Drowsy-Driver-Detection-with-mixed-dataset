@@ -1,11 +1,13 @@
 import tensorflow as tf
+from src.simple_mask import create_simple_mask_generator
 
 def get_binary_pipelines(
     base_dir,
     img_size=(224, 224),
     batch_size=32,
     seed=42,
-    class_names=("NotDrowsy", "Drowsy")  # 0->NotDrowsy, 1->Drowsy - FIXED ORDER
+    class_names=("NotDrowsy", "Drowsy"),  # 0->NotDrowsy, 1->Drowsy - FIXED ORDER
+    use_masks=False
 ):
     AUTOTUNE = tf.data.AUTOTUNE
 
@@ -71,11 +73,32 @@ def get_binary_pipelines(
         num_parallel_calls=AUTOTUNE
     )
 
-    # 5) Performance: cache + prefetch
-    # (Extra shuffling on train helps)
-    train_ds = train_ds.cache().shuffle(1000, seed=seed).prefetch(AUTOTUNE)
-    val_ds   = val_ds.cache().prefetch(AUTOTUNE)
-    test_ds  = test_ds.cache().prefetch(AUTOTUNE)
+    # 5) Add masks if requested
+    if use_masks:
+        mask_generator = create_simple_mask_generator(img_size)
+        
+        def add_masks(x, y):
+            masks = mask_generator.generate_mask(x)  # (batch, H, W, 1)
+            # Convert pixel-level masks to sample-level weights
+            # Take mean of mask values for each sample
+            sample_weights = tf.reduce_mean(masks, axis=[1, 2, 3])  # (batch,)
+            return x, y, sample_weights
+        
+        train_ds = train_ds.map(add_masks, num_parallel_calls=AUTOTUNE)
+        val_ds = val_ds.map(add_masks, num_parallel_calls=AUTOTUNE)
+        test_ds = test_ds.map(add_masks, num_parallel_calls=AUTOTUNE)
+
+    # 6) Performance: cache + prefetch
+    # Use a modest shuffle buffer to avoid long warm-ups
+    buffer_size = max(128, batch_size * 8)
+
+    # Allow non-deterministic interleaving for speed
+    options = tf.data.Options()
+    options.experimental_deterministic = False
+
+    train_ds = train_ds.cache().shuffle(buffer_size, seed=seed).prefetch(AUTOTUNE).with_options(options)
+    val_ds   = val_ds.cache().prefetch(AUTOTUNE).with_options(options)
+    test_ds  = test_ds.cache().prefetch(AUTOTUNE).with_options(options)
 
     # class_names is stored on Dataset objects; still returning for convenience.
     return train_ds, val_ds, test_ds, list(class_names)

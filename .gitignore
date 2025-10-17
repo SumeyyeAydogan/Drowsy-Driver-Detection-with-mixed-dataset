@@ -58,6 +58,7 @@ coverage.xml
 dataset/**
 !dataset/.gitkeep
 splitted_dataset/**
+splitted_dataset_lib/**
 !splitted_dataset/.gitkeep
 
 # Model weights and artifacts

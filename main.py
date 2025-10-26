@@ -93,7 +93,7 @@ if __name__ == "__main__":
     print("🎯 Starting training...")
     
     # Get all training callbacks (custom + standard Keras callbacks)
-    callbacks = get_training_callbacks(run_manager)
+    callbacks = get_training_callbacks(run_manager, val_ds)
     
     # Train the model
     history = train_model(

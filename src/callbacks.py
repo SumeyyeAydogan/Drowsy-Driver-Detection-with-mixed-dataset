@@ -1,6 +1,7 @@
 # callbacks.py - Custom training callbacks with GradCAM visualizations
 import tensorflow as tf
 import os
+import random
 from tensorflow.keras.callbacks import EarlyStopping, ReduceLROnPlateau
 from src.gradcam import GradCAM  # Ensure your GradCAM class is imported
 
@@ -34,7 +35,7 @@ class GradCAMEpochCallback(tf.keras.callbacks.Callback):
     Callback to save GradCAM visualizations for validation dataset at the end of each epoch.
     Visualizations are saved into TP/TN/FP/FN folders.
     """
-    def __init__(self, test_ds, output_dir="gradcam_epoch_outputs", max_samples=5):
+    def __init__(self, test_ds, output_dir="gradcam_epoch_outputs", max_samples=10):
         """
         Args:
             test_ds: tf.data.Dataset for GradCAM visualization (validation set recommended)
@@ -65,50 +66,58 @@ class GradCAMEpochCallback(tf.keras.callbacks.Callback):
         if self.gradcam is None:
             self.gradcam = GradCAM(self.model)
 
-        sample_count = 0
+        # 1️⃣ Collect all samples from dataset
+        all_samples = []
         for batch_images, batch_labels in self.test_ds:
             for i in range(len(batch_images)):
-                if sample_count >= self.max_samples:
-                    break
-                image = batch_images[i].numpy()
-                # Determine true class index (binary mode: single float value)
-                # Label is already 0.0 or 1.0 in binary mode
-                true_idx = int(batch_labels[i].numpy())
-
-                # Model prediction
-                pred_vec = self.model.predict(image[None, ...], verbose=0)
-                # Model outputs sigmoid probability [0.0-1.0]
-                pred_prob = float(pred_vec.ravel()[0])
-                pred_idx = 1 if pred_prob >= 0.5 else 0
-
-                # Select folder based on TP/TN/FP/FN
-                if true_idx == 1 and pred_idx == 1:
-                    folder = tp_dir
-                    status = "TP"
-                elif true_idx == 0 and pred_idx == 0:
-                    folder = tn_dir
-                    status = "TN"
-                elif true_idx == 0 and pred_idx == 1:
-                    folder = fp_dir
-                    status = "FP"
-                elif true_idx == 1 and pred_idx == 0:
-                    folder = fn_dir
-                    status = "FN"
-
-                # File path
-                save_path = os.path.join(folder, f"sample_{sample_count:02d}_true{true_idx}_pred{pred_idx}.png")
-                
-                # Debug print
-                if sample_count < 3:  # Print first 3 samples
-                    print(f"  Sample {sample_count}: True={true_idx}, Pred={pred_idx} (prob={pred_prob:.3f}) -> {status}")
-
-                # Save GradCAM visualization
-                self.gradcam.visualize(image, save_path=save_path, true_class_idx=true_idx)
-
-                sample_count += 1
-
+                all_samples.append((batch_images[i], batch_labels[i]))
+        
+        # 2️⃣ Random shuffle for diversity
+        random.seed(epoch_num * 42)  # Different seed per epoch but reproducible
+        random.shuffle(all_samples)
+        
+        # 3️⃣ Select random samples
+        sample_count = 0
+        for image, label in all_samples:
             if sample_count >= self.max_samples:
                 break
+                
+            image_np = image.numpy()
+            # Determine true class index (binary mode: single float value)
+            # Label is already 0.0 or 1.0 in binary mode
+            true_idx = int(label.numpy())
+
+            # Model prediction
+            pred_vec = self.model.predict(image_np[None, ...], verbose=0)
+            # Model outputs sigmoid probability [0.0-1.0]
+            pred_prob = float(pred_vec.ravel()[0])
+            pred_idx = 1 if pred_prob >= 0.5 else 0
+
+            # Select folder based on TP/TN/FP/FN
+            if true_idx == 1 and pred_idx == 1:
+                folder = tp_dir
+                status = "TP"
+            elif true_idx == 0 and pred_idx == 0:
+                folder = tn_dir
+                status = "TN"
+            elif true_idx == 0 and pred_idx == 1:
+                folder = fp_dir
+                status = "FP"
+            elif true_idx == 1 and pred_idx == 0:
+                folder = fn_dir
+                status = "FN"
+
+            # File path
+            save_path = os.path.join(folder, f"sample_{sample_count:02d}_true{true_idx}_pred{pred_idx}.png")
+            
+            # Debug print
+            if sample_count < 3:  # Print first 3 samples
+                print(f"  Sample {sample_count}: True={true_idx}, Pred={pred_idx} (prob={pred_prob:.3f}) -> {status}")
+
+            # Save GradCAM visualization
+            self.gradcam.visualize(image_np, save_path=save_path, true_class_idx=true_idx)
+
+            sample_count += 1
 
         print(f"[GradCAM] Saved {sample_count} GradCAM samples for epoch {epoch_num}")
 

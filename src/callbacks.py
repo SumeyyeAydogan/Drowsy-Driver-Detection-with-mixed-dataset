@@ -79,13 +79,13 @@ class GradCAMEpochCallback(tf.keras.callbacks.Callback):
         # Always create new GradCAM instance for each epoch to get epoch-specific logs
         # Use epoch-specific log file if provided
         if self.log_file:
-            log_path = os.path.join(os.path.dirname(self.log_file), 
-                                   f"gradcam_epoch_{epoch_num:02d}.log")
+            logs_root = os.path.join(os.path.dirname(self.log_file), "gradcam_logs")
+            os.makedirs(logs_root, exist_ok=True)
+            log_path = os.path.join(logs_root, f"epoch_{epoch_num:03d}.log")
         else:
             log_path = None
         
-        # Create new gradcam instance for this epoch
-        # Debug her 1 çağrıda - gradient vanishing araştırması için
+        # Create new gradcam instance for this epoch (log every sample)
         gradcam = GradCAM(self.model, log_file=log_path, debug_every=1)
         print(f"[GradCAM Callback] Created GradCAM for epoch {epoch_num} (log: {log_path})")
 
@@ -131,17 +131,20 @@ class GradCAMEpochCallback(tf.keras.callbacks.Callback):
                 status = "FN"
 
             # File path
-            save_path = os.path.join(folder, f"sample_{sample_count:02d}_true{true_idx}_pred{pred_idx}.png")
+            filename = f"sample_{sample_count:02d}_true{true_idx}_pred{pred_idx}.png"
+            save_path = os.path.join(folder, filename)
             
-            # Debug print
+            # Debug print (console)
             if sample_count < 3:  # Print first 3 samples
                 print(f"  Sample {sample_count}: True={true_idx}, Pred={pred_idx} (prob={pred_prob:.3f}) -> {status}")
-            '''
+
             # Save GradCAM visualization
-            self.gradcam.visualize(image_np, save_path=save_path, true_class_idx=true_idx)
-            '''
-            # Save GradCAM visualization (use the gradcam instance we created for this epoch)
             gradcam.visualize(image_np, save_path=save_path, true_class_idx=true_idx)
+
+            # Write a simple per-sample line into the epoch log (if logging is enabled)
+            if log_path is not None:
+                # Use GradCAM internal logger to append
+                gradcam._log(f"[{status}] {filename} prob={pred_prob:.3f} true={true_idx} pred={pred_idx}")
 
             sample_count += 1
 

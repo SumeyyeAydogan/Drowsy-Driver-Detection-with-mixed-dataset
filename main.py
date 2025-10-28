@@ -95,7 +95,9 @@ if __name__ == "__main__":
     
     # Get all training callbacks (custom + standard Keras callbacks)
     gradcam_epoch_outputs = os.path.join(run_manager.run_dir, "gradcam_epoch_outputs")
-    callbacks = get_training_callbacks(run_manager, val_ds, gradcam_epoch_outputs)
+    gradcam_log_file = os.path.join(run_manager.run_dir, "gradcam_debug.log")
+    callbacks = get_training_callbacks(run_manager, val_ds, gradcam_epoch_outputs, 
+                                      max_samples=5, gradcam_log_file=gradcam_log_file)
     
     # Train the model
     history = train_model(

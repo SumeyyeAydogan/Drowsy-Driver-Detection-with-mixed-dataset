@@ -14,6 +14,9 @@ except Exception:  # pragma: no cover
     DepthwiseConv2D = tuple()  # type: ignore
 import os
 import re
+import sys
+import logging
+from datetime import datetime
 
 
 # ---------- Helpers ----------
@@ -48,11 +51,20 @@ class GradCAM:
     Simple GradCAM for explaining CNN predictions
     """
 
-    def __init__(self, model, layer_name=None):
+    def __init__(self, model, layer_name=None, log_file=None, debug_every=1):
         """
         Initialize GradCAM with a trained model
+        
+        Args:
+            model: Trained model
+            layer_name: Name of layer to use for GradCAM (if None, picks last Conv2D)
+            log_file: Path to save debug output (if None, only prints to console)
+            debug_every: Print debug stats every N calls (1 = every call, 10 = every 10th)
         """
         self.model = model
+        self._debug_counter = 0  # Track number of visualizations
+        self.log_file = log_file
+        self.debug_every = debug_every
 
         # Build model once to ensure outputs exist
         if not hasattr(self.model, 'output') or self.model.output is None:
@@ -79,9 +91,18 @@ class GradCAM:
                 inputs=self.model.input,
                 outputs=[self.model.get_layer(self.layer_name).output, self.model.output]
             )
+            self._log(f"[GradCAM] Using layer: {self.layer_name}")
         except Exception:
             # Fallback: use original model; we'll return a dummy heatmap
             self.grad_model = self.model
+            self._log(f"[GradCAM] Failed to create grad_model, using fallback")
+
+    def _log(self, message):
+        """Print to console and optionally write to log file"""
+        print(message)
+        if self.log_file:
+            with open(self.log_file, 'a', encoding='utf-8') as f:
+                f.write(f"{datetime.now().strftime('%Y-%m-%d %H:%M:%S')} - {message}\n")
 
     def compute_heatmap(self, image, class_idx=None):
         """
@@ -118,6 +139,22 @@ class GradCAM:
                 class_output = predictions[:, class_idx]
 
         grads = tape.gradient(class_output, conv_outputs)
+        
+        # DEBUG: Print periodically or if gradient is None
+        if grads is None:
+            self._log(f"[GradCAM WARNING] Gradient is None! This indicates vanishing gradients.")
+            # Create dummy heatmap
+            h, w = conv_outputs.shape[1], conv_outputs.shape[2]
+            heatmap = np.random.rand(h, w) * 0.01
+            heatmap = heatmap / (np.max(heatmap) + 1e-8)
+            return heatmap, predictions.numpy()
+        else:
+            # Print debug every N calls
+            if self._debug_counter % self.debug_every == 0:
+                grad_mean = tf.reduce_mean(grads).numpy()
+                grad_std = tf.math.reduce_std(grads).numpy()
+                self._log(f"[DEBUG #{self._debug_counter}] Gradient stats - Mean: {grad_mean:.6f}, Std: {grad_std:.6f}, Min: {tf.reduce_min(grads).numpy():.6f}, Max: {tf.reduce_max(grads).numpy():.6f}")
+        
         # Global average pooling over H,W
         # Support possible time dimension: (B,T,H,W,C)
         if len(conv_outputs.shape) == 5:
@@ -126,12 +163,27 @@ class GradCAM:
             grads = grads[:, -1]
         pooled_grads = tf.reduce_mean(grads, axis=(0, 1, 2))
         conv_outputs = conv_outputs[0]  # (H, W, C)
+        
+        # DEBUG: Print periodically
+        if self._debug_counter % self.debug_every == 0:
+            self._log(f"[DEBUG #{self._debug_counter}] Pooled gradients stats - Mean: {tf.reduce_mean(pooled_grads).numpy():.6f}, Std: {tf.math.reduce_std(pooled_grads).numpy():.6f}")
 
         # Weighted sum across channels
         heatmap = tf.tensordot(conv_outputs, pooled_grads, axes=[[2], [0]])
         heatmap = tf.nn.relu(heatmap)
+        
+        # DEBUG: Print heatmap statistics periodically
+        if self._debug_counter % self.debug_every == 0:
+            self._log(f"[DEBUG #{self._debug_counter}] Heatmap stats BEFORE normalization - Mean: {tf.reduce_mean(heatmap).numpy():.6f}, Std: {tf.math.reduce_std(heatmap).numpy():.6f}, Min: {tf.reduce_min(heatmap).numpy():.6f}, Max: {tf.reduce_max(heatmap).numpy():.6f}")
+        
         denom = tf.reduce_max(heatmap)
         heatmap = heatmap / (denom + 1e-8)
+        
+        # DEBUG: Print heatmap statistics periodically
+        if self._debug_counter % self.debug_every == 0:
+            self._log(f"[DEBUG #{self._debug_counter}] Heatmap stats AFTER normalization - Mean: {tf.reduce_mean(heatmap).numpy():.6f}, Std: {tf.math.reduce_std(heatmap).numpy():.6f}, Min: {tf.reduce_min(heatmap).numpy():.6f}, Max: {tf.reduce_max(heatmap).numpy():.6f}")
+        
+        self._debug_counter += 1
 
         return heatmap.numpy(), predictions.numpy()
 
@@ -160,7 +212,7 @@ class GradCAM:
         overlayed = (1 - alpha) * img + alpha * heatmap_colored
         return np.clip(overlayed, 0.0, 1.0)
 
-    def visualize(self, image, class_names=('NotDrowsy', 'Drowsy'),  # ✅ Match dataloader (no space)
+    def visualize(self, image, class_names=('NotDrowsy', 'Drowsy'),
                   threshold=0.5, target_class=None, save_path=None,
                   true_class_idx=None):
         """

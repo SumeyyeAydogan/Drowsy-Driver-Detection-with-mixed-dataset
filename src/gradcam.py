@@ -14,26 +14,12 @@ except Exception:  # pragma: no cover
     DepthwiseConv2D = tuple()  # type: ignore
 import os
 import re
+import sys
+import logging
+from datetime import datetime
 
 
 # ---------- Helpers ----------
-
-def _to_class_index(y) -> int:
-    """
-    Convert label tensors/arrays to a scalar class index.
-    Works for:
-      - binary scalar (float in {0.,1.})
-      - shape (1,) binary
-      - one-hot vector
-    """
-    arr = np.array(y)
-    if arr.ndim == 0:
-        return int(round(float(arr)))
-    flat = arr.reshape(-1)
-    if flat.size == 1:
-        return int(round(float(flat[0])))
-    return int(np.argmax(flat))
-
 
 def _pred_to_prob_and_class(pred):
     """
@@ -65,11 +51,20 @@ class GradCAM:
     Simple GradCAM for explaining CNN predictions
     """
 
-    def __init__(self, model, layer_name=None):
+    def __init__(self, model, layer_name=None, log_file=None, debug_every=1):
         """
         Initialize GradCAM with a trained model
+        
+        Args:
+            model: Trained model
+            layer_name: Name of layer to use for GradCAM (if None, picks last Conv2D)
+            log_file: Path to save debug output (if None, only prints to console)
+            debug_every: Print debug stats every N calls (1 = every call, 10 = every 10th)
         """
         self.model = model
+        self._debug_counter = 0  # Track number of visualizations
+        self.log_file = log_file
+        self.debug_every = debug_every
 
         # Build model once to ensure outputs exist
         if not hasattr(self.model, 'output') or self.model.output is None:
@@ -96,9 +91,18 @@ class GradCAM:
                 inputs=self.model.input,
                 outputs=[self.model.get_layer(self.layer_name).output, self.model.output]
             )
+            self._log(f"[GradCAM] Using layer: {self.layer_name}")
         except Exception:
             # Fallback: use original model; we'll return a dummy heatmap
             self.grad_model = self.model
+            self._log(f"[GradCAM] Failed to create grad_model, using fallback")
+
+    def _log(self, message):
+        """Print to console and optionally write to log file"""
+        print(message)
+        if self.log_file:
+            with open(self.log_file, 'a', encoding='utf-8') as f:
+                f.write(f"{datetime.now().strftime('%Y-%m-%d %H:%M:%S')} - {message}\n")
 
     def compute_heatmap(self, image, class_idx=None):
         """
@@ -135,6 +139,22 @@ class GradCAM:
                 class_output = predictions[:, class_idx]
 
         grads = tape.gradient(class_output, conv_outputs)
+        
+        # DEBUG: Print periodically or if gradient is None
+        if grads is None:
+            self._log(f"[GradCAM WARNING] Gradient is None! This indicates vanishing gradients.")
+            # Create dummy heatmap
+            h, w = conv_outputs.shape[1], conv_outputs.shape[2]
+            heatmap = np.random.rand(h, w) * 0.01
+            heatmap = heatmap / (np.max(heatmap) + 1e-8)
+            return heatmap, predictions.numpy()
+        else:
+            # Print debug every N calls
+            if self._debug_counter % self.debug_every == 0:
+                grad_mean = tf.reduce_mean(grads).numpy()
+                grad_std = tf.math.reduce_std(grads).numpy()
+                self._log(f"[DEBUG #{self._debug_counter}] Gradient stats - Mean: {grad_mean:.6f}, Std: {grad_std:.6f}, Min: {tf.reduce_min(grads).numpy():.6f}, Max: {tf.reduce_max(grads).numpy():.6f}")
+        
         # Global average pooling over H,W
         # Support possible time dimension: (B,T,H,W,C)
         if len(conv_outputs.shape) == 5:
@@ -143,12 +163,27 @@ class GradCAM:
             grads = grads[:, -1]
         pooled_grads = tf.reduce_mean(grads, axis=(0, 1, 2))
         conv_outputs = conv_outputs[0]  # (H, W, C)
+        
+        # DEBUG: Print periodically
+        if self._debug_counter % self.debug_every == 0:
+            self._log(f"[DEBUG #{self._debug_counter}] Pooled gradients stats - Mean: {tf.reduce_mean(pooled_grads).numpy():.6f}, Std: {tf.math.reduce_std(pooled_grads).numpy():.6f}")
 
         # Weighted sum across channels
         heatmap = tf.tensordot(conv_outputs, pooled_grads, axes=[[2], [0]])
         heatmap = tf.nn.relu(heatmap)
+        
+        # DEBUG: Print heatmap statistics periodically
+        if self._debug_counter % self.debug_every == 0:
+            self._log(f"[DEBUG #{self._debug_counter}] Heatmap stats BEFORE normalization - Mean: {tf.reduce_mean(heatmap).numpy():.6f}, Std: {tf.math.reduce_std(heatmap).numpy():.6f}, Min: {tf.reduce_min(heatmap).numpy():.6f}, Max: {tf.reduce_max(heatmap).numpy():.6f}")
+        
         denom = tf.reduce_max(heatmap)
         heatmap = heatmap / (denom + 1e-8)
+        
+        # DEBUG: Print heatmap statistics periodically
+        if self._debug_counter % self.debug_every == 0:
+            self._log(f"[DEBUG #{self._debug_counter}] Heatmap stats AFTER normalization - Mean: {tf.reduce_mean(heatmap).numpy():.6f}, Std: {tf.math.reduce_std(heatmap).numpy():.6f}, Min: {tf.reduce_min(heatmap).numpy():.6f}, Max: {tf.reduce_max(heatmap).numpy():.6f}")
+        
+        self._debug_counter += 1
 
         return heatmap.numpy(), predictions.numpy()
 
@@ -177,7 +212,7 @@ class GradCAM:
         overlayed = (1 - alpha) * img + alpha * heatmap_colored
         return np.clip(overlayed, 0.0, 1.0)
 
-    def visualize(self, image, class_names=('Not Drowsy', 'Drowsy'),
+    def visualize(self, image, class_names=('NotDrowsy', 'Drowsy'),
                   threshold=0.5, target_class=None, save_path=None,
                   true_class_idx=None):
         """
@@ -232,157 +267,101 @@ class GradCAM:
         return fig, prediction
 
 
-def analyze_model_gradcam(model, test_ds, num_samples=10, output_dir="gradcam_results",
-                         class_names=('Not Drowsy', 'Drowsy'), threshold=0.5,
-                         subject_diverse_dir=None, misclassified_only=False,
-                         confusion=False, max_per_category=10,
-                         confusion_limit=False):
+def analyze_subjects_gradcam(
+    model,
+    test_dir,
+    num_samples=10,
+    output_dir="gradcam_subjects",
+    class_names=("NotDrowsy", "Drowsy"),
+    img_size=(224, 224),
+    seed=42
+):
     """
-    Analyze model with GradCAM on samples from test_ds.
-    Supports:
-      - confusion=True: saves TP/TN/FP/FN folders.
-      - misclassified_only=True: saves only FP/FN up to max_per_category each.
-      - confusion_limit=True: applies max_per_category limit to each confusion bucket.
-    Gracefully handles cases with fewer available samples.
+    GradCAM analysis by subjects (case-sensitive).
+
+    - Loads images from a test directory containing 'Drowsy' and 'NotDrowsy' subfolders.
+    - Picks one image per subject (case-sensitive; e.g., 'ALICE' ≠ 'alice').
+    - Generates and saves GradCAM visualizations grouped into TP, TN, FP, FN folders.
     """
 
-    # Prepare output folders
-    os.makedirs(output_dir, exist_ok=True)
-    if confusion:
-        for sub in ("TP", "TN", "FP", "FN"):
-            os.makedirs(os.path.join(output_dir, sub), exist_ok=True)
-    elif misclassified_only:
-        for sub in ("FP", "FN"):
-            os.makedirs(os.path.join(output_dir, sub), exist_ok=True)
+    rng = np.random.default_rng(seed)
+
+    # 1️⃣ Build dataset automatically from directory (labels inferred)
+    ds = tf.keras.utils.image_dataset_from_directory(
+        test_dir,
+        labels="inferred",
+        label_mode="binary",  # ✅ Match dataloader label_mode
+        class_names=list(class_names),
+        image_size=img_size,
+        shuffle=False
+    )
+
+    file_paths = ds.file_paths  # all file paths in the dataset
+
+    ds = ds.apply(tf.data.experimental.ignore_errors())
+
+    # 2️⃣ Extract subject names (case-sensitive)
+    subj_re = re.compile(r"^([A-Za-z]+)")
+    subj_to_examples = {}
+
+    for path, (img, label) in zip(file_paths, ds.unbatch()):
+        fname = os.path.basename(path)
+        m = subj_re.match(fname)
+        if not m:
+            continue
+        subj = m.group(1)  # case-sensitive (do NOT lowercase)
+        subj_to_examples.setdefault(subj, []).append((path, int(label.numpy())))
+
+    subjects = list(subj_to_examples.keys())
+    rng.shuffle(subjects)
+
+    print(f"📂 Found {len(subjects)} subjects (case-sensitive).")
+
+    # 3️⃣ Create output folders for each confusion category
+    for sub in ("TP", "TN", "FP", "FN"):
+        os.makedirs(os.path.join(output_dir, sub), exist_ok=True)
 
     gradcam = GradCAM(model)
     sample_count = 0
 
-    # Counters for each category
-    fp_saved, fn_saved, tp_saved, tn_saved = 0, 0, 0, 0
-
-    for batch_images, batch_labels in test_ds:
-        # Stop early if all requested categories reached their limits
-        if misclassified_only and fp_saved >= max_per_category and fn_saved >= max_per_category:
-            break
-        if confusion and confusion_limit and all([
-            tp_saved >= max_per_category,
-            tn_saved >= max_per_category,
-            fp_saved >= max_per_category,
-            fn_saved >= max_per_category
-        ]):
-            break
-        if not misclassified_only and not confusion and sample_count >= num_samples:
+    # 4️⃣ Iterate over subjects and analyze
+    for subj in subjects:
+        if sample_count >= num_samples:
             break
 
-        batch_preds = model.predict(batch_images, verbose=0)
+        examples = subj_to_examples[subj]
+        fpath, true_idx = examples[rng.integers(0, len(examples))]
 
-        for i in range(len(batch_images)):
-            image = batch_images[i].numpy()
-            true_idx = _to_class_index(batch_labels[i].numpy())
+        # Load and normalize the image
+        img = tf.keras.utils.load_img(fpath, target_size=img_size)
+        img_arr = tf.keras.utils.img_to_array(img) / 255.0
 
-            local_pred = batch_preds[i:i+1]
-            prob_local, pred_idx_local = _pred_to_prob_and_class(local_pred)
+        # Model prediction
+        pred_vec = model.predict(img_arr[None, ...], verbose=0)
+        prob, pred_idx = _pred_to_prob_and_class(pred_vec)
 
-            # Determine confusion matrix category
-            if int(true_idx) == 1 and pred_idx_local == 1:
-                bucket = "TP"
-            elif int(true_idx) == 0 and pred_idx_local == 0:
-                bucket = "TN"
-            elif int(true_idx) == 0 and pred_idx_local == 1:
-                bucket = "FP"
-            else:
-                bucket = "FN"
-
-            # Skip non-misclassified if requested
-            if misclassified_only and bucket not in ("FP", "FN"):
-                continue
-
-            # Apply per-category limits (for misclassified or confusion_limit modes)
-            if misclassified_only or (confusion and confusion_limit):
-                if bucket == "FP" and fp_saved >= max_per_category:
-                    continue
-                if bucket == "FN" and fn_saved >= max_per_category:
-                    continue
-                if confusion_limit:
-                    if bucket == "TP" and tp_saved >= max_per_category:
-                        continue
-                    if bucket == "TN" and tn_saved >= max_per_category:
-                        continue
-
-            # Stop entirely if general limit reached
-            if not misclassified_only and not confusion and sample_count >= num_samples:
-                break
-
-            # Compute GradCAM
-            target_class = None
-            if np.array(batch_preds).ndim == 2 and np.array(batch_preds).shape[1] == 2:
-                target_class = 1  # explain "Drowsy" class
-
-            fig, pred_vec = gradcam.visualize(
-                image,
-                class_names=class_names,
-                threshold=threshold,
-                target_class=target_class,
-                true_class_idx=true_idx,
-                save_path=None
-            )
-
-            prob, pred_idx = _pred_to_prob_and_class(pred_vec)
-
-            # Save visualization
-            save_folder = os.path.join(output_dir, bucket if (confusion or misclassified_only) else "")
-            os.makedirs(save_folder, exist_ok=True)
-            save_path = os.path.join(save_folder, f'sample_{sample_count:03d}.png')
-            fig.savefig(save_path, dpi=300, bbox_inches='tight')
-            plt.close(fig)
-
-            print(f"Sample {sample_count:03d}: True={class_names[true_idx]}, "
-                  f"Pred={class_names[pred_idx]} ({prob:.3f}) -> {bucket}")
-
-            # Update counters
-            if bucket == "FP":
-                fp_saved += 1
-            elif bucket == "FN":
-                fn_saved += 1
-            elif bucket == "TP":
-                tp_saved += 1
-            elif bucket == "TN":
-                tn_saved += 1
-
-            sample_count += 1
-
-        # Break outer loop if limits reached
-        if misclassified_only and fp_saved >= max_per_category and fn_saved >= max_per_category:
-            break
-        if confusion and confusion_limit and all([
-            tp_saved >= max_per_category,
-            tn_saved >= max_per_category,
-            fp_saved >= max_per_category,
-            fn_saved >= max_per_category
-        ]):
-            break
-
-    # Summary reporting
-    if misclassified_only:
-        print("\n--- Misclassified Summary ---")
-        print(f"FP saved: {fp_saved}/{max_per_category}")
-        print(f"FN saved: {fn_saved}/{max_per_category}")
-        if fp_saved == 0 and fn_saved == 0:
-            print("⚠️ No FP or FN samples found.")
+        # Determine confusion category
+        if true_idx == 1 and pred_idx == 1:
+            bucket = "TP"
+        elif true_idx == 0 and pred_idx == 0:
+            bucket = "TN"
+        elif true_idx == 0 and pred_idx == 1:
+            bucket = "FP"
         else:
-            if fp_saved < max_per_category:
-                print(f"ℹ️ Only {fp_saved} FP samples found (requested {max_per_category}).")
-            if fn_saved < max_per_category:
-                print(f"ℹ️ Only {fn_saved} FN samples found (requested {max_per_category}).")
-    elif confusion and confusion_limit:
-        print("\n--- Confusion Matrix Summary ---")
-        print(f"TP saved: {tp_saved}/{max_per_category}")
-        print(f"TN saved: {tn_saved}/{max_per_category}")
-        print(f"FP saved: {fp_saved}/{max_per_category}")
-        print(f"FN saved: {fn_saved}/{max_per_category}")
-        print(f"✅ GradCAM (confusion_limit mode) complete! Results saved in: {output_dir}/")
-    else:
-        print(f"\n✅ GradCAM analysis complete! Results saved in: {output_dir}/")
+            bucket = "FN"
 
+        # Generate and save GradCAM visualization
+        fig, _ = gradcam.visualize(
+            img_arr,
+            class_names=class_names,
+            true_class_idx=true_idx,
+            save_path=os.path.join(output_dir, bucket, f"{subj}.png")
+        )
+        plt.close(fig)
 
+        print(f"🧍 {subj}: True={class_names[true_idx]}, Pred={class_names[pred_idx]} "
+              f"({prob:.2f}) -> {bucket}")
+        sample_count += 1
+
+    print(f"\n✅ GradCAM analysis completed ({sample_count} subjects processed).")
+    print(f"Results saved in: {output_dir}/[TP|TN|FP|FN]/")

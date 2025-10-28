@@ -187,7 +187,7 @@ def plot_metrics(history, save_path=None):
     
     plt.show()
 
-def plot_confusion_matrix(y_true, y_pred, class_names=['Not Drowsy', 'Drowsy'], save_path=None):
+def plot_confusion_matrix(y_true, y_pred, class_names=['NotDrowsy', 'Drowsy'], save_path=None):
     """Plot confusion matrix"""
     cm = confusion_matrix(y_true, y_pred)
     

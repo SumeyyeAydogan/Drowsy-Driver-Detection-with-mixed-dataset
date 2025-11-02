@@ -11,6 +11,7 @@ from src.gradcam import analyze_subjects_gradcam
 from src.export          import save_model
 from src.run_manager     import RunManager
 from src.callbacks       import get_training_callbacks
+import splitfolders
 
 
 if __name__ == "__main__":
@@ -33,7 +34,8 @@ if __name__ == "__main__":
 
     # 3) Create Train/Val/Test folder hierarchy
     #    raw_dir contains => drowsy, notdrowsy
-    split_dataset(raw_dir, output_dir, classes=("NotDrowsy", "Drowsy"), seed=42)
+    #split_dataset(raw_dir, output_dir, classes=("NotDrowsy", "Drowsy"), seed=42)
+    #splitfolders.ratio(raw_dir, output=output_dir, seed=1337, ratio=(.8, 0.15, 0.05))
 
     # 4) Create run manager
     print("📁 Creating run manager...")

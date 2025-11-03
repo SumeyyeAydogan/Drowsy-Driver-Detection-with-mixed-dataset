@@ -3,7 +3,7 @@ import tensorflow as tf
 import os
 import random
 from tensorflow.keras.callbacks import EarlyStopping, ReduceLROnPlateau
-from src.gradcam import GradCAM  # Ensure your GradCAM class is imported
+from src.gradcam import CustomGradCAM
 
 # ------------------------------
 # 1. Checkpoint callback
@@ -64,17 +64,6 @@ class GradCAMEpochCallback(tf.keras.callbacks.Callback):
         fn_dir = os.path.join(epoch_dir, "FN")
         for d in [tp_dir, tn_dir, fp_dir, fn_dir]:
             os.makedirs(d, exist_ok=True)
-        '''
-        if self.gradcam is None:
-            # Use epoch-specific log file if provided
-            if self.log_file:
-                log_path = os.path.join(os.path.dirname(self.log_file), 
-                                       f"gradcam_epoch_{epoch_num}.log")
-            else:
-                log_path = None
-            self.gradcam = GradCAM(self.model, log_file=log_path)
-            print(f"[GradCAM Callback] Initialized GradCAM on epoch {epoch_num}")
-        '''
 
         # Always create new GradCAM instance for each epoch to get epoch-specific logs
         # Use epoch-specific log file if provided
@@ -86,7 +75,7 @@ class GradCAMEpochCallback(tf.keras.callbacks.Callback):
             log_path = None
         
         # Create new gradcam instance for this epoch (log every sample)
-        gradcam = GradCAM(self.model, log_file=log_path, debug_every=1)
+        gradcam = CustomGradCAM(self.model, log_file=log_path, debug_every=1)
         print(f"[GradCAM Callback] Created GradCAM for epoch {epoch_num} (log: {log_path})")
 
         # 1️⃣ Collect all samples from dataset
@@ -139,7 +128,7 @@ class GradCAMEpochCallback(tf.keras.callbacks.Callback):
                 print(f"  Sample {sample_count}: True={true_idx}, Pred={pred_idx} (prob={pred_prob:.3f}) -> {status}")
 
             # Save GradCAM visualization
-            gradcam.visualize(image_np, save_path=save_path, true_class_idx=true_idx)
+            gradcam.visualize(image_np, save_path=save_path, true_idx=true_idx)
 
             # Write a simple per-sample line into the epoch log (if logging is enabled)
             if log_path is not None:

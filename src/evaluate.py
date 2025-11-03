@@ -1,7 +1,7 @@
 import numpy as np
 from sklearn.metrics import classification_report
 from src.utils import plot_confusion_matrix, plot_roc_curve, plot_precision_recall_curve
-from src.gradcam import analyze_subjects_gradcam
+from src.gradcam_analysis import analyze_subjects_gradcam
 import os
 
 def evaluate_model(

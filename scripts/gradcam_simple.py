@@ -1,118 +1,113 @@
 """
-Simple GradCAM Usage Example
+Simple script to test GradCAM visualization.
+Modify the variables below to test different models and settings.
 """
-import numpy as np
+
 import os
+import sys
 import tensorflow as tf
-from src.model import build_model
-from src.gradcam import GradCAM, analyze_model_gradcam
+
+# Add project root to path
+project_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+sys.path.insert(0, project_root)
+
+from src.gradcam_analysis import analyze_subjects_gradcam, analyze_tf_keras_gradcam
 from src.dataloader import get_binary_pipelines
 
+# ============================================
+# CONFIGURATION - Modify these as needed
+# ============================================
 
-def main():
-    """
-    Simple GradCAM example for visualizing CNN attention.
-    Supports both single image and batch-level analysis.
-    """
-    print("🎯 Simple GradCAM Example")
-    print("=" * 40)
-    
-    # Adjustable parameters
-    NUM_SAMPLES = 12          # Target number of examples to visualize
-    MISCLASSIFIED_ONLY = True # If True, only show misclassified samples
+# Model path
+MODEL_PATH = os.path.join(project_root, "runs", "20_epoch", "models", "final_model.h5")
 
-    # Repository paths
-    project_root = os.path.dirname(os.path.abspath(__file__))
-    #repo_root = os.path.dirname(project_root) #for file inside script folder
+# Dataset directory
+DATASET_ROOT = os.path.join(project_root, "splitted_dataset")
 
-    # Dataset root directory (no train/val/test folders inside)
-    dataset_root = os.path.join(project_root, "splitted_dataset_lib")
+# Output directory (if None, will be auto-generated next to model)
+OUTPUT_DIR = None
 
-    # 1. Load model
-    print("1. Loading model...")
-    RUN_NAME = "30_mixed"
-    MODEL_PATH = os.path.join(project_root, "runs", RUN_NAME, "models", "final_model.h5")
-    try:
-        model = tf.keras.models.load_model(MODEL_PATH)
-        print(f"✅ Loaded model: {MODEL_PATH}")
-    except Exception as e:
-        print(f"⚠️  Could not load model at {MODEL_PATH}: {e}")
-        print("⚠️  Using a newly built (untrained) model for demonstration.")
-        model = build_model()
+# Number of samples to process
+NUM_SAMPLES = 30
 
-    # 2. Load dataset
-    print("2. Loading test dataset...")
-    try:
-        train_ds, val_ds, test_ds, class_names = get_binary_pipelines(dataset_root)
-        print("✅ Test dataset loaded successfully")
-    except Exception as e:
-        print(f"❌ Error loading dataset: {e}")
-        return
-    
-    # 3. Single image GradCAM example
-    print("3. Running single image GradCAM example...")
-    for batch_images, batch_labels in test_ds.take(1):
-        sample_image = batch_images[0].numpy()
-        true_label = int(batch_labels[0].numpy())
-        break
-    
-    gradcam = GradCAM(model)
-    fig, prediction = gradcam.visualize(
-        sample_image, 
-        class_names=['Not Drowsy', 'Drowsy'],
-        save_path="gradcam_example.png"
-    )
-    
-    pred_class = np.argmax(prediction)
-    confidence = prediction[0][pred_class] if prediction.ndim == 2 else prediction[pred_class]
-    print(f"   True: {['Not Drowsy', 'Drowsy'][true_label]}")
-    print(f"   Pred: {['Not Drowsy', 'Drowsy'][pred_class]} ({confidence:.3f})")
-    
-    # 4. Batch-level GradCAM analysis
-    print("4. Running batch GradCAM analysis...")
-    # Derive output directory from model path
-    output_dir = "gradcam_batch"
-    model_dir = os.path.dirname(MODEL_PATH)
-    if os.path.basename(model_dir) == "models":
-        run_root = os.path.dirname(model_dir)
-        output_dir = os.path.join(run_root, "plots", "gradcam_batch")
-    else:
-        # Fallback: if model path is inside runs/<run_name>/..., place results under that run
-        parts = model_dir.replace("\\", "/").split("/")
-        if "runs" in parts:
-            runs_idx = parts.index("runs")
-            if runs_idx + 1 < len(parts):
-                run_root = os.path.join(*parts[:runs_idx+2])
-                output_dir = os.path.join(run_root, "plots", "gradcam_batch")
-    os.makedirs(output_dir, exist_ok=True)
+# Method: "custom" or "tf_keras_vis"
+METHOD = "custom"
 
-    # Run GradCAM analysis
-    try:
-        analyze_model_gradcam(
-            model,
-            test_ds,
-            num_samples=NUM_SAMPLES,
-            output_dir=output_dir,
-            class_names=class_names if class_names else ['Not Drowsy', 'Drowsy'],
-            misclassified_only=MISCLASSIFIED_ONLY,
-            confusion=False  # You can set True to split into TP/TN/FP/FN
-        )
-    except Exception as e:
-        print(f"⚠️  GradCAM analysis encountered an issue: {e}")
-    
-    # Extra info for misclassified-only mode
-    if MISCLASSIFIED_ONLY:
-        # Count how many samples were actually saved
-        saved_images = [f for f in os.listdir(output_dir) if f.endswith('.png')]
-        if len(saved_images) == 0:
-            print("⚠️  No misclassified samples found. The dataset may be too accurate or too small.")
-        elif len(saved_images) < NUM_SAMPLES:
-            print(f"ℹ️  Only {len(saved_images)} misclassified samples found (requested {NUM_SAMPLES}).")
+# Random seed
+SEED = 42
 
-    print("\n✅ GradCAM example completed!")
-    print(f"📁 Single example: gradcam_example.png")
-    print(f"📁 Batch results: {output_dir}")
-
+# ============================================
+# MAIN EXECUTION
+# ============================================
 
 if __name__ == "__main__":
-    main()
+    print("🎯 GradCAM Test Script")
+    print("=" * 50)
+    
+    # Load model
+    print(f"📂 Loading model: {MODEL_PATH}")
+    try:
+        model = tf.keras.models.load_model(MODEL_PATH)
+        print("✅ Model loaded successfully!")
+    except Exception as e:
+        print(f"❌ Failed to load model: {e}")
+        sys.exit(1)
+    
+    # Determine output directory
+    if OUTPUT_DIR is None:
+        model_dir = os.path.dirname(MODEL_PATH)
+        if os.path.basename(model_dir) == "models":
+            run_root = os.path.dirname(model_dir)
+        else:
+            run_root = model_dir
+        
+        method_suffix = "tf_keras" if METHOD == "tf_keras_vis" else "custom"
+        OUTPUT_DIR = os.path.join(run_root, f"gradcam_{method_suffix}")
+    
+    print(f"📁 Output directory: {OUTPUT_DIR}")
+    
+    # Run analysis based on method
+    if METHOD == "tf_keras_vis":
+        print(f"\n🎯 Running tf-keras-vis GradCAM analysis...")
+        try:
+            train_ds, val_ds, test_ds, class_names = get_binary_pipelines(DATASET_ROOT)
+            print("✅ Dataset loaded from pipeline")
+            
+            analyze_tf_keras_gradcam(
+                model=model,
+                test_ds=test_ds,
+                output_dir=OUTPUT_DIR,
+                num_samples=NUM_SAMPLES,
+                class_names=tuple(class_names),
+                seed=SEED
+            )
+        except ImportError as e:
+            print(f"❌ Error: {e}")
+            print("   Install tf-keras-vis with: pip install tf-keras-vis")
+            sys.exit(1)
+        except Exception as e:
+            print(f"❌ Error during analysis: {e}")
+            sys.exit(1)
+    else:
+        print(f"\n🎯 Running custom GradCAM analysis...")
+        test_dir = os.path.join(DATASET_ROOT, "test")
+        
+        if not os.path.exists(test_dir):
+            print(f"❌ Test directory not found: {test_dir}")
+            sys.exit(1)
+        
+        try:
+            analyze_subjects_gradcam(
+                model=model,
+                test_dir=test_dir,
+                output_dir=OUTPUT_DIR,
+                num_samples=NUM_SAMPLES,
+                seed=SEED
+            )
+        except Exception as e:
+            print(f"❌ Error during analysis: {e}")
+            sys.exit(1)
+    
+    print(f"\n✅ Analysis completed!")
+    print(f"📁 Results saved to: {OUTPUT_DIR}")
+

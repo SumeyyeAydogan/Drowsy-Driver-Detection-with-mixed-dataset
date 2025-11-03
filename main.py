@@ -7,8 +7,7 @@ from src.model           import build_model
 from src.train           import train_model
 from src.utils           import plot_history, plot_metrics, create_run_directories, plot_dataset_distribution
 from src.evaluate        import evaluate_model
-from src.gradcam import analyze_subjects_gradcam
-from src.export          import save_model
+from src.gradcam_analysis import analyze_tf_keras_gradcam
 from src.run_manager     import RunManager
 from src.callbacks       import get_training_callbacks
 import splitfolders
@@ -125,12 +124,12 @@ if __name__ == "__main__":
     print("🧪 Evaluating model on training set...")
     train_plots_dir = os.path.join(run_manager.run_dir, "plots", "train_gradcam")
     os.makedirs(train_plots_dir, exist_ok=True)
-    analyze_subjects_gradcam(
-        model,
-        test_dir=os.path.join(output_dir, "train"),
-        num_samples=20,
+    analyze_tf_keras_gradcam(
+        model=model,
+        test_ds=train_ds,
         output_dir=train_plots_dir,
-        class_names=("NotDrowsy", "Drowsy")
+        num_samples=30,
+        class_names=tuple(class_names)
     )
     print("✅ Training evaluation completed!")
 

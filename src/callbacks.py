@@ -78,9 +78,13 @@ class GradCAMEpochCallback(tf.keras.callbacks.Callback):
         gradcam = CustomGradCAM(self.model, log_file=log_path, debug_every=1)
         print(f"[GradCAM Callback] Created GradCAM for epoch {epoch_num} (log: {log_path})")
 
-        # 1️⃣ Collect all samples from dataset
+        # 1️⃣ Collect all samples from dataset (support (x,y) and (x,y,w))
         all_samples = []
-        for batch_images, batch_labels in self.test_ds:
+        for batch in self.test_ds:
+            if isinstance(batch, (tuple, list)) and len(batch) == 3:
+                batch_images, batch_labels, _ = batch
+            else:
+                batch_images, batch_labels = batch
             for i in range(len(batch_images)):
                 all_samples.append((batch_images[i], batch_labels[i]))
         

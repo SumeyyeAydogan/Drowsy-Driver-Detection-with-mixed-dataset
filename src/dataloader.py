@@ -1,11 +1,13 @@
 import tensorflow as tf
+from src.simple_mask import create_simple_mask_generator
 
 def get_binary_pipelines(
     base_dir,
     img_size=(224, 224),
-    batch_size=32,
+    batch_size=16,
     seed=42,
-    class_names=("NotDrowsy", "Drowsy")  # 0->NotDrowsy, 1->Drowsy - FIXED ORDER
+    class_names=("NotDrowsy", "Drowsy"),  # 0->NotDrowsy, 1->Drowsy - FIXED ORDER
+    use_masks=False
 ):
     AUTOTUNE = tf.data.AUTOTUNE
 
@@ -71,7 +73,27 @@ def get_binary_pipelines(
         num_parallel_calls=AUTOTUNE
     )
 
-    # 5) Performance: cache + prefetch
+    # 5) Add masks if requested
+    if use_masks:
+        mask_generator = create_simple_mask_generator(img_size)
+        
+        def add_dynamic_weights(x, y):
+            masks = mask_generator.generate_mask(x)  # (batch, H, W, 1)
+            # Dynamic per-sample weight: ROI intensity relative to global intensity
+            eps = tf.constant(1e-8, dtype=x.dtype)
+            roi_intensity = tf.reduce_sum(x * masks, axis=[1, 2, 3])
+            total_intensity = tf.reduce_sum(x, axis=[1, 2, 3]) + eps
+            focus_ratio = roi_intensity / total_intensity  # (batch,)
+
+            # Normalize to mean ≈ 1 within batch for stability
+            batch_mean = tf.reduce_mean(focus_ratio) + eps
+            sample_weights = focus_ratio / batch_mean
+            sample_weights = tf.maximum(sample_weights, tf.constant(1e-4, dtype=sample_weights.dtype))
+            return x, y, sample_weights
+        
+        train_ds = train_ds.map(add_dynamic_weights, num_parallel_calls=AUTOTUNE)
+
+    # 6) Performance: cache + prefetch
     # (Extra shuffling on train helps)
     train_ds = train_ds.cache().shuffle(1000, seed=seed).prefetch(AUTOTUNE)
     val_ds   = val_ds.cache().prefetch(AUTOTUNE)

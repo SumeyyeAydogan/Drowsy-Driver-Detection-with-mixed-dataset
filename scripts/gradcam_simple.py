@@ -36,6 +36,9 @@ METHOD = "custom"
 # Random seed
 SEED = 42
 
+# Save only misclassified samples (FP/FN) if True
+ONLY_FALSE = False
+
 # ============================================
 # MAIN EXECUTION
 # ============================================
@@ -63,6 +66,8 @@ if __name__ == "__main__":
         
         method_suffix = "tf_keras" if METHOD == "tf_keras_vis" else "custom"
         OUTPUT_DIR = os.path.join(run_root, f"gradcam_{method_suffix}")
+        if ONLY_FALSE:
+            OUTPUT_DIR = f"{OUTPUT_DIR}_missclassified"
     
     print(f"📁 Output directory: {OUTPUT_DIR}")
     
@@ -79,7 +84,8 @@ if __name__ == "__main__":
                 output_dir=OUTPUT_DIR,
                 num_samples=NUM_SAMPLES,
                 class_names=tuple(class_names),
-                seed=SEED
+                seed=SEED,
+                include_buckets=("FP", "FN") if ONLY_FALSE else None
             )
         except ImportError as e:
             print(f"❌ Error: {e}")
@@ -102,7 +108,8 @@ if __name__ == "__main__":
                 test_dir=test_dir,
                 output_dir=OUTPUT_DIR,
                 num_samples=NUM_SAMPLES,
-                seed=SEED
+                seed=SEED,
+                include_buckets=("FP", "FN") if ONLY_FALSE else None
             )
         except Exception as e:
             print(f"❌ Error during analysis: {e}")

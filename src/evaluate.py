@@ -13,7 +13,6 @@ def evaluate_model(
     misclassified_only=False,
     ds_name="test",
     num_gradcam_samples=10,
-    confusion=True
 ):
     """
     Evaluate model performance on test dataset
@@ -23,8 +22,18 @@ def evaluate_model(
     y_pred = []
     y_pred_proba = []
     
-    for x_batch, y_batch in test_ds:
-        # Get predictions
+    for batch in test_ds:
+        # Handle datasets that provide sample weights
+        if isinstance(batch, (tuple, list)):
+            if len(batch) == 3:
+                x_batch, y_batch, _ = batch
+            elif len(batch) == 2:
+                x_batch, y_batch = batch
+            else:
+                raise ValueError(f"Unexpected batch structure length: {len(batch)}")
+        else:
+            raise ValueError(f"Unexpected batch type: {type(batch)}")
+
         preds = model.predict(x_batch, verbose=0)
         
         # For binary classification: y_batch is already 0 or 1
@@ -64,9 +73,10 @@ def evaluate_model(
     analyze_subjects_gradcam(
         model,
         test_dir=subject_diverse_dir,
-        num_samples=20,
+        num_samples=num_gradcam_samples,
         output_dir=gradcam_dir,
-        class_names=tuple(class_names)
+        class_names=tuple(class_names),
+        include_buckets=("FP", "FN") if misclassified_only else None
     )
     
     # 7) Return metrics for further analysis

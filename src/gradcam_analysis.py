@@ -70,14 +70,18 @@ def analyze_subjects_gradcam(
         os.makedirs(os.path.join(output_dir, sub), exist_ok=True)
 
     saved = 0
+    sample_counter = {}  # Track sample count per bucket for unique filenames
+    
+    # Process all subjects - one sample per subject for diversity
     for subj in subjects:
         if saved >= num_samples:
             break
         # Try all samples of the subject in random order until we find a desired bucket
         samples = list(subj_to_samples[subj])
         rng.shuffle(samples)
+        found_one = False  # Track if we found a valid sample from this subject
         for path, true_label in samples:
-            if saved >= num_samples:
+            if saved >= num_samples or found_one:
                 break
             img = tf.keras.utils.load_img(path, target_size=img_size)
             img_arr = tf.keras.utils.img_to_array(img) / 255.0
@@ -97,11 +101,15 @@ def analyze_subjects_gradcam(
                 bucket = "FN"
 
             if include_buckets is None or bucket in include_buckets:
-                out_path = os.path.join(output_dir, bucket, f"{subj}.png")
+                # Create unique filename with counter
+                sample_counter[bucket] = sample_counter.get(bucket, 0) + 1
+                fname_base = os.path.splitext(os.path.basename(path))[0]
+                out_path = os.path.join(output_dir, bucket, f"{fname_base}_{sample_counter[bucket]:03d}.png")
                 cam.visualize(img_arr, class_names, true_idx=true_label, save_path=out_path)
                 cam._log(f"🧍 {subj}: Truth={class_names[true_label]}, Pred={class_names[pred_cls]} "
                          f"({disp_prob:.2f}) -> {bucket}")
                 saved += 1
+                found_one = True  # Only one sample per subject for diversity
 
     cam._log(f"✅ GradCAM analysis completed (saved {saved} samples). Results: {output_dir}")
 

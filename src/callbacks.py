@@ -2,6 +2,7 @@
 import tensorflow as tf
 import os
 import random
+import numpy as np
 from tensorflow.keras.callbacks import EarlyStopping, ReduceLROnPlateau
 from src.gradcam import CustomGradCAM
 
@@ -144,9 +145,87 @@ class GradCAMEpochCallback(tf.keras.callbacks.Callback):
         print(f"[GradCAM] Saved {sample_count} GradCAM samples for epoch {epoch_num}")
 
 # ------------------------------
-# 3. Function to get all training callbacks
+# 3. Sample Weight Monitoring Callback
 # ------------------------------
-def get_training_callbacks(run_manager, val_ds=None, gradcam_output_dir="gradcam_epoch_outputs", max_samples=5, gradcam_log_file=None):
+class SampleWeightMonitorCallback(tf.keras.callbacks.Callback):
+    """
+    Callback to monitor and log sample_weights statistics during training.
+    Helps verify that sample_weights are being used correctly.
+    """
+    def __init__(self, train_ds, log_file=None, log_every_n_epochs=1):
+        """
+        Args:
+            train_ds: Training dataset (should have sample_weights)
+            log_file: Optional file path to save statistics
+            log_every_n_epochs: Log statistics every N epochs (default: every epoch)
+        """
+        super().__init__()
+        self.train_ds = train_ds
+        self.log_file = log_file
+        self.log_every_n_epochs = log_every_n_epochs
+        self.epoch_stats = []
+        
+        if log_file:
+            os.makedirs(os.path.dirname(log_file) if os.path.dirname(log_file) else '.', exist_ok=True)
+    
+    def on_epoch_end(self, epoch, logs=None):
+        """Log sample_weight statistics at the end of each epoch"""
+        if (epoch + 1) % self.log_every_n_epochs != 0:
+            return
+        
+        epoch_num = epoch + 1
+        all_weights = []
+        all_labels = []
+        
+        # Collect sample_weights from a few batches
+        batch_count = 0
+        for batch in self.train_ds.take(5):  # Check first 5 batches
+            if isinstance(batch, (tuple, list)) and len(batch) == 3:
+                _, y_batch, w_batch = batch
+                weights_np = w_batch.numpy()
+                labels_np = y_batch.numpy().flatten()
+                all_weights.extend(weights_np)
+                all_labels.extend(labels_np)
+                batch_count += 1
+        
+        if len(all_weights) == 0:
+            print(f"[SampleWeight] Epoch {epoch_num}: No sample_weights found in dataset!")
+            return
+        
+        # Calculate statistics
+        all_weights = np.array(all_weights)
+        all_labels = np.array(all_labels)
+        
+        stats = {
+            'epoch': epoch_num,
+            'mean': float(np.mean(all_weights)),
+            'std': float(np.std(all_weights)),
+            'min': float(np.min(all_weights)),
+            'max': float(np.max(all_weights)),
+            'median': float(np.median(all_weights)),
+            'drowsy_mean': float(np.mean(all_weights[all_labels == 1])) if np.sum(all_labels == 1) > 0 else 0.0,
+            'notdrowsy_mean': float(np.mean(all_weights[all_labels == 0])) if np.sum(all_labels == 0) > 0 else 0.0,
+            'samples_checked': len(all_weights)
+        }
+        self.epoch_stats.append(stats)
+        
+        # Print to console
+        print(f"\n[SampleWeight] Epoch {epoch_num} Statistics:")
+        print(f"  Mean: {stats['mean']:.4f}, Std: {stats['std']:.4f}, Range: [{stats['min']:.4f}, {stats['max']:.4f}]")
+        print(f"  By class - Drowsy: {stats['drowsy_mean']:.4f}, NotDrowsy: {stats['notdrowsy_mean']:.4f}")
+        print(f"  Samples checked: {stats['samples_checked']}")
+        
+        # Write to file if specified
+        if self.log_file:
+            import json
+            with open(self.log_file, 'w') as f:
+                json.dump(self.epoch_stats, f, indent=2)
+
+# ------------------------------
+# 4. Function to get all training callbacks
+# ------------------------------
+def get_training_callbacks(run_manager, val_ds=None, gradcam_output_dir="gradcam_epoch_outputs", max_samples=5, gradcam_log_file=None, 
+                          train_ds=None, monitor_sample_weights=False, sample_weight_log_file=None):
     """
     Returns all training callbacks including checkpoint, early stopping,
     learning rate scheduler, and optional GradCAM visualizations.
@@ -157,6 +236,9 @@ def get_training_callbacks(run_manager, val_ds=None, gradcam_output_dir="gradcam
         gradcam_output_dir: folder to save GradCAM outputs
         max_samples: max number of samples per epoch to save
         gradcam_log_file: optional path to save GradCAM debug logs
+        train_ds: Training dataset (required if monitor_sample_weights=True)
+        monitor_sample_weights: Whether to monitor sample_weights during training
+        sample_weight_log_file: Path to save sample_weight statistics (optional)
 
     Returns:
         list of callbacks
@@ -167,6 +249,11 @@ def get_training_callbacks(run_manager, val_ds=None, gradcam_output_dir="gradcam
         ReduceLROnPlateau(monitor='val_auc', factor=0.5, patience=3, min_lr=1e-6)
     ]
 
+    # Add sample weight monitoring if requested
+    if monitor_sample_weights and train_ds is not None:
+        callbacks.append(
+            SampleWeightMonitorCallback(train_ds, log_file=sample_weight_log_file)
+        )
     
     if val_ds is not None:
         callbacks.append(

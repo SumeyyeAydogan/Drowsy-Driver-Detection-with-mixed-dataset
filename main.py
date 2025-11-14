@@ -38,7 +38,7 @@ if __name__ == "__main__":
     
     # 4) Create run manager
     print("?? Creating run manager...")
-    run_manager = RunManager("30_epoch_with-mask_sbj-gradcam")
+    run_manager = RunManager("30_soft-mask_sw-a02-train")
     print(f"? Run manager created: {run_manager.run_dir}")
 
     # 5) tf.data pipelines
@@ -49,7 +49,9 @@ if __name__ == "__main__":
         img_size=(224, 224),
         batch_size=32,
         seed=42,
-        use_masks=True  # Enable eye-mouth focused masks
+        use_masks=True,  # Enable eye-mouth focused masks
+        use_soft_mask=True,  # Soft mask
+        mask_alpha=0.2
     )
     print("? Datasets loaded successfully!")
     '''
@@ -66,8 +68,6 @@ if __name__ == "__main__":
                 print(tf.reduce_mean(y_batch))
 
     _print_batch_info(train_ds, "train")
-    _print_batch_info(val_ds, "val")
-    _print_batch_info(test_ds, "test")
     '''
     # 5.1) Plot dataset distribution
     print("?? Analyzing dataset distribution...")
@@ -111,8 +111,17 @@ if __name__ == "__main__":
     # Get all training callbacks (custom + standard Keras callbacks)
     gradcam_epoch_outputs = os.path.join(run_manager.run_dir, "gradcam_epoch_outputs")
     gradcam_log_file = os.path.join(run_manager.run_dir, "gradcam_debug.log")
-    callbacks = get_training_callbacks(run_manager, val_ds, gradcam_epoch_outputs, 
-                                      max_samples=10, gradcam_log_file=gradcam_log_file)
+    sample_weight_log_file = os.path.join(run_manager.run_dir, "sample_weights_stats.json")
+    callbacks = get_training_callbacks(
+        run_manager, 
+        val_ds, 
+        gradcam_epoch_outputs, 
+        max_samples=10, 
+        gradcam_log_file=gradcam_log_file,
+        train_ds=train_ds,  # Pass train_ds for sample_weight monitoring
+        monitor_sample_weights=True,  # Enable sample_weight monitoring
+        sample_weight_log_file=sample_weight_log_file
+    )
     
     # Train the model
     history = train_model(
@@ -122,9 +131,6 @@ if __name__ == "__main__":
         epochs=epoch_count,
         callbacks=callbacks,  # Add all callbacks
         initial_epoch=initial_epoch,  # Resume from checkpoint if available
-        #use_gradient_loss=False,  # Use sample_weight approach for better integration
-        lambda_grad=0.1,  # Weight for gradient penalty
-        #target_layer_name="conv2d_2"  # Target intermediate layer for gradient computation
     )
     print("? Training completed!")
 

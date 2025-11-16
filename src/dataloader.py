@@ -9,7 +9,10 @@ def get_binary_pipelines(
     class_names=("NotDrowsy", "Drowsy"),
     use_masks=False,
     use_soft_mask=False,
-    mask_alpha=0.2
+    mask_alpha=0.2,
+    use_background_aug=False,  # Adversarial background augmentation
+    bg_aug_prob=0.4,           # Probability of applying background augmentation
+    bg_aug_face_ratio=0.4      # Face region ratio (center of image)
 ):
     AUTOTUNE = tf.data.AUTOTUNE
 
@@ -74,6 +77,19 @@ def get_binary_pipelines(
         lambda x, y: (normalization(x), y),
         num_parallel_calls=AUTOTUNE
     )
+
+    # 4.5) Add adversarial background augmentation (BEFORE masks, AFTER normalization)
+    if use_background_aug:
+        from src.adversarial_augmentation import RandomBackgroundReplacement
+        bg_aug_layer = RandomBackgroundReplacement(
+            prob=bg_aug_prob,
+            face_center_ratio=bg_aug_face_ratio
+        )
+        # Apply only to training set
+        train_ds = train_ds.map(
+            lambda x, y: (bg_aug_layer(x, training=True), y),
+            num_parallel_calls=AUTOTUNE
+        )
 
     # 5) Add masks if requested
     if use_masks:

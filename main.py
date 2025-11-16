@@ -36,24 +36,66 @@ if __name__ == "__main__":
     #split_dataset(raw_dir, output_dir, classes=("NotDrowsy", "Drowsy"), seed=42)
     #splitfolders.ratio(raw_dir, output=output_dir, seed=1337, ratio=(.8, 0.15, 0.05))
     
-    # 4) Create run manager
-    print("?? Creating run manager...")
-    run_manager = RunManager("30_soft-mask_sw-a02-train")
-    print(f"? Run manager created: {run_manager.run_dir}")
+    # 4) EXPERIMENT CONFIGURATION
+    # ============================================================
+    # Test Strategy Options:
+    # 1. Adversarial Augmentation ONLY (recommended first test)
+    #    - USE_SAMPLE_WEIGHT=False, USE_ADVERSARIAL_AUG=True
+    # 2. Sample Weight ONLY (current baseline)
+    #    - USE_SAMPLE_WEIGHT=True, USE_ADVERSARIAL_AUG=False
+    # 3. BOTH (hybrid approach - test after individual tests)
+    #    - USE_SAMPLE_WEIGHT=True, USE_ADVERSARIAL_AUG=True
+    # ============================================================
+    
+    USE_SAMPLE_WEIGHT = False  # Set to True to enable sample weight
+    USE_ADVERSARIAL_AUG = True  # Set to True to enable adversarial augmentation
+    
+    # Create run name based on configuration
+    run_name_parts = []
+    if USE_SAMPLE_WEIGHT:
+        run_name_parts.append("sw")  # sample weight
+    if USE_ADVERSARIAL_AUG:
+        run_name_parts.append("adv-aug")  # adversarial augmentation
+    if not run_name_parts:
+        run_name_parts.append("baseline")
+    run_name = "30_epoch_" + "_".join(run_name_parts)
+    
+    # 5) Create run manager
+    print("📁 Creating run manager...")
+    run_manager = RunManager(run_name)
+    print(f"✅ Run manager created: {run_manager.run_dir}")
 
-    # 5) tf.data pipelines
+    # 6) tf.data pipelines
     # LOADER (binary: NotDrowsy=0, Drowsy=1)
-    print("?? Loading datasets...")
+    print("🔄 Loading datasets...")
+    
     train_ds, val_ds, test_ds, class_names = get_binary_pipelines(
         output_dir,
         img_size=(224, 224),
         batch_size=32,
         seed=42,
-        use_masks=True,  # Enable eye-mouth focused masks
-        use_soft_mask=True,  # Soft mask
-        mask_alpha=0.2
+        # Sample weight configuration
+        use_masks=USE_SAMPLE_WEIGHT,  # Enable eye-mouth focused masks
+        use_soft_mask=True if USE_SAMPLE_WEIGHT else False,  # Soft mask
+        mask_alpha=0.2 if USE_SAMPLE_WEIGHT else 0.2,
+        # Adversarial augmentation configuration
+        use_background_aug=USE_ADVERSARIAL_AUG,  # Enable adversarial background augmentation
+        bg_aug_prob=0.4 if USE_ADVERSARIAL_AUG else 0.0,  # Probability of applying augmentation
+        bg_aug_face_ratio=0.4 if USE_ADVERSARIAL_AUG else 0.4  # Face region ratio
     )
-    print("? Datasets loaded successfully!")
+    
+    # Print configuration
+    print("\n" + "=" * 50)
+    print("📋 EXPERIMENT CONFIGURATION:")
+    print("=" * 50)
+    print(f"  ✅ Sample Weight:        {USE_SAMPLE_WEIGHT}")
+    print(f"  ✅ Adversarial Aug:       {USE_ADVERSARIAL_AUG}")
+    if USE_ADVERSARIAL_AUG:
+        print(f"     - Augmentation Prob:  0.4")
+        print(f"     - Face Region Ratio:  0.4")
+    print("=" * 50 + "\n")
+    
+    print("✅ Datasets loaded successfully!")
     '''
     # Debug dataset shapes (support (x,y) and (x,y,w))
     def _print_batch_info(ds, name):

@@ -187,6 +187,13 @@ def plot_metrics(history, save_path=None):
     
     plt.show()
 
+def save_evaluation_report(report, roc_auc, save_path):
+    with open(save_path, "w") as f:
+        f.write("=== Classification Report ===\n")
+        f.write(report)
+        f.write("\n\n=== ROC–AUC Score ===\n")
+        f.write(str(roc_auc))
+
 def plot_confusion_matrix(y_true, y_pred, class_names=['NotDrowsy', 'Drowsy'], save_path=None):
     """Plot confusion matrix"""
     cm = confusion_matrix(y_true, y_pred)

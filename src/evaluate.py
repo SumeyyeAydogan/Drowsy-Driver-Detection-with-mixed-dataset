@@ -1,6 +1,6 @@
 import numpy as np
-from sklearn.metrics import classification_report
-from src.utils import plot_confusion_matrix, plot_roc_curve, plot_precision_recall_curve
+from sklearn.metrics import classification_report, roc_auc_score
+from src.utils import plot_confusion_matrix, plot_roc_curve, plot_precision_recall_curve, save_evaluation_report
 from src.gradcam_analysis import analyze_subjects_gradcam
 import os
 
@@ -12,7 +12,7 @@ def evaluate_model(
     subject_diverse_dir=None,
     misclassified_only=False,
     ds_name="test",
-    num_gradcam_samples=10,
+    num_gradcam_samples=50,
 ):
     """
     Evaluate model performance on test dataset
@@ -46,10 +46,16 @@ def evaluate_model(
     y_pred = np.array(y_pred)
     y_pred_proba = np.array(y_pred_proba)
     
+    roc_auc = roc_auc_score(y_true, y_pred_proba)
+
     # 2) Print classification report
     print("Classification Report:")
     print("=" * 50)
-    print(classification_report(y_true, y_pred, target_names=class_names))
+    report = classification_report(y_true, y_pred, target_names=class_names)
+    er_save_path = os.path.join(plots_dir, f"{ds_name}_evaluation_report.txt") if plots_dir else None
+    print(report)
+    save_evaluation_report(report, roc_auc, save_path=er_save_path)
+
     
     # 3) Plot confusion matrix
     print("Plotting Confusion Matrix...")

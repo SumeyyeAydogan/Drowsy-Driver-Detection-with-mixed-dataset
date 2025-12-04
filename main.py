@@ -47,17 +47,18 @@ if __name__ == "__main__":
     #    - USE_SAMPLE_WEIGHT=True, USE_ADVERSARIAL_AUG=True
     # ============================================================
     
-    USE_SAMPLE_WEIGHT = False  # Set to True to enable sample weight
-    USE_ADVERSARIAL_AUG = True  # Set to True to enable adversarial augmentation
+    USE_MASK = False  # Set to True to enable sample weight
+    USE_ADVERSARIAL_AUG = False  # Set to True to enable adversarial augmentation
+    GRADCAM_WEIGHTS_FILE = os.path.join(project_root, "artifacts", "optimized_gradcam_weights.json")
     
     # Create run name based on configuration
     run_name_parts = []
-    if USE_SAMPLE_WEIGHT:
-        run_name_parts.append("sw")  # sample weight
+    if USE_MASK:
+        run_name_parts.append("sw-gradcam")  # sample weight
     if USE_ADVERSARIAL_AUG:
         run_name_parts.append("adv-aug")  # adversarial augmentation
     if not run_name_parts:
-        run_name_parts.append("baseline")
+        run_name_parts.append("sw-gradcam-opt.penalize_backgd-gs-mask") #run_name_parts.append("baseline")
     run_name = "30_epoch_" + "_".join(run_name_parts)
     
     # 5) Create run manager
@@ -75,20 +76,21 @@ if __name__ == "__main__":
         batch_size=32,
         seed=42,
         # Sample weight configuration
-        use_masks=USE_SAMPLE_WEIGHT,  # Enable eye-mouth focused masks
-        use_soft_mask=True if USE_SAMPLE_WEIGHT else False,  # Soft mask
-        mask_alpha=0.2 if USE_SAMPLE_WEIGHT else 0.2,
+        use_masks=USE_MASK,  # Enable eye-mouth focused masks
+        use_soft_mask=True if USE_MASK else False,  # Soft mask
+        mask_alpha=0.2 if USE_MASK else 0.2,
         # Adversarial augmentation configuration
         use_background_aug=USE_ADVERSARIAL_AUG,  # Enable adversarial background augmentation
         bg_aug_prob=0.4 if USE_ADVERSARIAL_AUG else 0.0,  # Probability of applying augmentation
-        bg_aug_face_ratio=0.4 if USE_ADVERSARIAL_AUG else 0.4  # Face region ratio
+        bg_aug_face_ratio=0.75 if USE_ADVERSARIAL_AUG else 0.75,  # Face region ratio
+        gradcam_weights_path=GRADCAM_WEIGHTS_FILE
     )
     
     # Print configuration
     print("\n" + "=" * 50)
     print("📋 EXPERIMENT CONFIGURATION:")
     print("=" * 50)
-    print(f"  ✅ Sample Weight:        {USE_SAMPLE_WEIGHT}")
+    print(f"  ✅ Sample Weight:        {USE_MASK}")
     print(f"  ✅ Adversarial Aug:       {USE_ADVERSARIAL_AUG}")
     if USE_ADVERSARIAL_AUG:
         print(f"     - Augmentation Prob:  0.4")

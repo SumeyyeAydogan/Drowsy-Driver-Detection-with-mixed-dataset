@@ -4,7 +4,7 @@ Compatible with TensorFlow graph mode, less complex.
 """
 import tensorflow as tf
 import numpy as np
-from typing import Tuple
+from typing import Tuple, Optional
 
 
 class SimpleEyeMouthMaskGenerator:
@@ -86,3 +86,62 @@ def create_simple_mask_generator(img_size: Tuple[int, int] = (224, 224), use_sof
         alpha: Background transparency for soft masking (0.0 = fully masked, 1.0 = fully visible)
     """
     return SimpleEyeMouthMaskGenerator(img_size, use_soft_mask=use_soft_mask, alpha=alpha)
+
+
+def create_mask_numpy(img_size: Tuple[int, int] = (224, 224), use_soft_mask: bool = False, 
+                      alpha: float = 0.2, apply_gaussian: bool = False, sigma: float = 7.0) -> np.ndarray:
+    """
+    Create mask as numpy array (for optimization scripts, not TensorFlow graph).
+    
+    Args:
+        img_size: Image dimensions (height, width)
+        use_soft_mask: If True, use soft masking instead of hard mask
+        alpha: Background transparency for soft masking (0.0 = fully masked, 1.0 = fully visible)
+        apply_gaussian: If True, apply Gaussian blur to soften mask edges
+        sigma: Gaussian blur sigma parameter
+        
+    Returns:
+        numpy array of shape (height, width) with values 0-1
+    """
+    h, w = img_size
+    
+    # Define regions (same as SimpleEyeMouthMaskGenerator)
+    eye_top = int(0.2 * h)
+    eye_bottom = int(0.53 * h)
+    eye_left = int(0.1 * w)
+    eye_right = int(0.9 * w)
+    
+    mouth_top = int(0.57 * h)
+    mouth_bottom = int(0.9 * h)
+    mouth_left = int(0.2 * w)
+    mouth_right = int(0.8 * w)
+    
+    if use_soft_mask:
+        # Soft mask: ROI = 1.0, background = alpha
+        mask = np.ones((h, w), dtype=np.float32) * alpha
+        
+        # Eye region
+        mask[eye_top:eye_bottom, eye_left:eye_right] = 1.0
+        
+        # Mouth region
+        mask[mouth_top:mouth_bottom, mouth_left:mouth_right] = 1.0
+    else:
+        # Hard mask: ROI = 1.0, background = 0.0
+        mask = np.zeros((h, w), dtype=np.float32)
+        
+        # Eye region
+        mask[eye_top:eye_bottom, eye_left:eye_right] = 1.0
+        
+        # Mouth region
+        mask[mouth_top:mouth_bottom, mouth_left:mouth_right] = 1.0
+    
+    # Apply Gaussian blur if requested
+    if apply_gaussian:
+        try:
+            from scipy.ndimage import gaussian_filter
+            mask = gaussian_filter(mask, sigma=sigma)
+            mask = mask / (mask.max() + 1e-8)  # Normalize
+        except ImportError:
+            print("[Warning] scipy not available, skipping Gaussian blur")
+    
+    return mask

@@ -28,7 +28,7 @@ if __name__ == "__main__":
         raise FileNotFoundError(f"`dataset` not found: {raw_dir}")
 
     # 2) Folder where split data will go
-    output_dir = os.path.join(project_root, "splitted_dataset")
+    output_dir = os.path.join(project_root, "splitted_dataset_landmark")
     print(f"📁 Data directory: {output_dir}")
 
     # 3) Create Train/Val/Test folder hierarchy

@@ -49,7 +49,8 @@ if __name__ == "__main__":
     
     USE_MASK = False  # Set to True to enable sample weight
     USE_ADVERSARIAL_AUG = False  # Set to True to enable adversarial augmentation
-    GRADCAM_WEIGHTS_FILE = os.path.join(project_root, "artifacts", "optimized_gradcam_weights.json")
+    GRADCAM_WEIGHTS_FILE = os.path.join(project_root, "artifacts", "reward-landmark-soft","log_weights.json")
+    #exp_weights optimized_gradcam_weights
     
     # Create run name based on configuration
     run_name_parts = []
@@ -58,13 +59,15 @@ if __name__ == "__main__":
     if USE_ADVERSARIAL_AUG:
         run_name_parts.append("adv-aug")  # adversarial augmentation
     if not run_name_parts:
-        run_name_parts.append("sw-gradcam-opt.penalize_backgd-gs-mask") #run_name_parts.append("baseline")
-    run_name = "30_epoch_" + "_".join(run_name_parts)
+        run_name_parts.append("trial-log-reward-landmark-soft") #run_name_parts.append("baseline") exp-scale-sw-gradcam-reward-gs-eye-mouth-soft-mask
+    run_name = "15_epoch_" + "_".join(run_name_parts)
     
     # 5) Create run manager
     print("📁 Creating run manager...")
     run_manager = RunManager(run_name)
     print(f"✅ Run manager created: {run_manager.run_dir}")
+    print(tf.__version__); print(tf.config.list_physical_devices('GPU'))
+
 
     # 6) tf.data pipelines
     # LOADER (binary: NotDrowsy=0, Drowsy=1)
@@ -135,7 +138,7 @@ if __name__ == "__main__":
         print("?? Starting training from scratch")
     
     # 7) Save initial config
-    epoch_count=30
+    epoch_count=15
     config = {
         "run_name": run_manager.run_name,
         "epochs": epoch_count,

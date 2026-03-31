@@ -10,3 +10,6 @@ Pillow>=9.0
 
 # Image I/O / Utils
 opencv-python>=4.7
+
+# Kaggle API
+kaggle>=1.5

@@ -14,8 +14,11 @@ class RunManager:
         
     def _create_run_directories(self):
         """Create run directory structure"""
+        # NOTE: This file lives under `src/`, but we want `runs/` at the project root
+        # (same level as `src/`, `scripts/`, etc.). So we go one directory up.
+        project_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
         base_dir = "runs"
-        run_dir = os.path.join(base_dir, self.run_name)
+        run_dir = os.path.join(project_root, base_dir, self.run_name)
         
         # Create directories
         os.makedirs(os.path.join(run_dir, "checkpoints"), exist_ok=True)

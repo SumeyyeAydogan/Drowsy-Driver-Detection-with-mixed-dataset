@@ -16,7 +16,7 @@ from src.gradcam import CustomGradCAM
 # 1) LOAD MODEL (TF-KERAS)
 # ---------------------------------------------------------
 model1 = tf.keras.models.load_model("runs/30_epoch_without-mask_sbj-gradcam-fixed/models/final_model.h5", compile=False)
-model2 = tf.keras.models.load_model("runs/30_epoch_sw-gradcam-reward-gs-eye-mouth-soft-mask/models/final_model.h5", compile=False)
+model2 = tf.keras.models.load_model("runs/30_epoch_exp-sw-gradcam-reward-landmark-soft/models/final_model.h5", compile=False)
 
 # GradCAM objects
 cam1 = CustomGradCAM(model1)
@@ -26,13 +26,14 @@ cam2 = CustomGradCAM(model2)
 # 2) DIRECTORY SETTINGS
 # ---------------------------------------------------------
 #project_root = os.path.dirname(os.path.abspath(__file__))
-test_dir = os.path.join(project_root, "splitted_dataset", "val")
+test_dir = os.path.join(project_root, "splitted_dataset", "test")
 
 classes = ["NotDrowsy", "Drowsy"]
 
 # Output directory
-output_dir = Path(project_root) / "combined_fp_to_tn_val"
-output_dir.mkdir(exist_ok=True)
+output_dir = Path(project_root) / "combined_fp_to_tn" / "reward-landmark-soft" / "test"
+output_dir.mkdir(parents=True, exist_ok=True)
+
 
 # ---------------------------------------------------------
 # 3) IMAGE PREPROCESSING

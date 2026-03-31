@@ -15,11 +15,11 @@ from src.gradcam import CustomGradCAM
 
 # ================== CONFIG ======================
 CONFIG = {
-    "model_path": r"runs/30_epoch_exp-reward-landmark-soft/models/final_model.h5",
-    #"model_path": r"runs/30_epoch_baseline_e3_yawning/models/final_model.h5", runs/30_epoch_reward-soft-e3/models/final_model.h5
+    "model_path": r"runs/30_epoch_baseline/models/final_model.h5",
+    #"model_path": r"runs/30_epoch_reward-landmark-soft/models/final_model.h5", runs/30_epoch_reward-soft-e3/models/final_model.h5
     "data_dir": r"splitted_dataset/test",  # Changed to test dataset
     "img_size": (224, 224),
-    "model_name": "exp-reward model",  # Model name for histogram title
+    "model_name": "original model",  # Model name for histogram title
     "dataset_name": "test",  # Dataset name for histogram title
     "use_landmark_mask": True,  # Use dynamic landmark mask
     "landmark_box_half_size": 12,  # Half side-length of square patches around landmarks

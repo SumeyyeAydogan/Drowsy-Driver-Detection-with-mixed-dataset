@@ -39,7 +39,7 @@ import mediapipe as mp
 PROJECT_ROOT = Path(__file__).parent.parent
 
 SOURCE_SPLIT_ROOT = PROJECT_ROOT / "splitted_dataset"
-TARGET_SPLIT_ROOT = PROJECT_ROOT / "splitted_dataset_landmark"
+TARGET_SPLIT_ROOT = PROJECT_ROOT / "splitted_dataset_landmark_roi"
 
 IMAGE_EXTS = {".jpg", ".jpeg", ".png"}
 CLASSES = ("NotDrowsy", "Drowsy")
@@ -66,7 +66,7 @@ LEFT_EYE_IDX: List[int] = [33, 7, 163, 144, 145, 153, 154, 155, 133]
 RIGHT_EYE_IDX: List[int] = [263, 249, 390, 373, 374, 380, 381, 382, 362]
 MOUTH_IDX: List[int] = [78, 191, 80, 81, 82, 13, 312, 311, 310, 415, 308]
 
-
+ROI_IDX = LEFT_EYE_IDX + RIGHT_EYE_IDX + MOUTH_IDX
 def _landmarks_to_boxes(face_landmarks, idxs: Iterable[int], w: int, h: int) -> List[tuple]:
     """
     Convert selected landmark indices to square boxes in image coordinates.
@@ -105,9 +105,10 @@ def create_eye_mouth_mask(image_np: np.ndarray, face_landmarks) -> np.ndarray:
     draw = ImageDraw.Draw(pil_mask)
 
     boxes = (
-        _landmarks_to_boxes(face_landmarks, LEFT_EYE_IDX, w, h)
-        + _landmarks_to_boxes(face_landmarks, RIGHT_EYE_IDX, w, h)
-        + _landmarks_to_boxes(face_landmarks, MOUTH_IDX, w, h)
+        _landmarks_to_boxes(face_landmarks, ROI_IDX, w, h)
+        # _landmarks_to_boxes(face_landmarks, LEFT_EYE_IDX, w, h)
+        # + _landmarks_to_boxes(face_landmarks, RIGHT_EYE_IDX, w, h)
+        # + _landmarks_to_boxes(face_landmarks, MOUTH_IDX, w, h)
     )
 
     for (x0, y0, x1, y1) in boxes:

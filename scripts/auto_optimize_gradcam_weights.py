@@ -33,7 +33,8 @@ from src.gradcam import CustomGradCAM
 
 # ================== CONFIG ======================
 CONFIG = {
-    "model_path": r"runs/30_epoch_without-mask_sbj-gradcam-fixed/models/final_model.h5",
+    "model_path": r"runs/30_epoch_baseline/models/final_model.h5",
+    #"model_path": r"runs/30_epoch_exp-sw-gradcam-reward-landmark-soft/models/final_model.h5",
     "data_dir": r"splitted_dataset/train",
     "img_size": (224, 224),
     "use_landmark_mask": True,  # Use dynamic landmark mask instead of static mask

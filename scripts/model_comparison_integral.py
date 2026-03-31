@@ -29,6 +29,7 @@ CONFIG = {
 MODEL_CONFIGS = [
     {"label": "orijinal",   "model_path": r"runs/30_epoch_baseline/models/final_model.h5"},
     {"label": "reward",     "model_path": r"runs/30_epoch_reward-landmark-soft/models/final_model.h5"},
+    {"label": "log-reward", "model_path": r"runs/30_epoch_log-reward-landmark-soft/models/final_model.h5"},
     {"label": "exp-reward", "model_path": r"runs/30_epoch_exp-reward-landmark-soft/models/final_model.h5"},
 ]
 
@@ -160,45 +161,102 @@ def collect_focus_ratios(model, data_dir, img_size):
 
 
 # ================== PLOT ======================
-def plot_histograms(results_dict, dataset_name, out_path):
-    """
-    results_dict: label -> np.array focus_ratios
-    """
-    labels = [k for k in ["orijinal", "reward", "exp-reward"] if k in results_dict]
-    if not labels:
-        print("[WARN] No results to plot.")
-        return
+def plot_focus_ratio_by_model(results_dict, dataset_name, output_path):
+    fig, axes = plt.subplots(2, 2, figsize=(14, 10))
+    fig.suptitle(f'Focus Ratio Distribution by Model - {dataset_name}', fontsize=16, fontweight='bold')
 
-    # common bins
-    all_vals = np.concatenate([results_dict[l] for l in labels if len(results_dict[l]) > 0])
-    if len(all_vals) == 0:
-        print("[WARN] Empty arrays, skip plot.")
-        return
+    order = [
+        ("orijinal", 0, 0),
+        ("reward", 0, 1),
+        ("log-reward", 1, 0),
+        ("exp-reward", 1, 1),
+    ]
 
-    bins = int(CONFIG.get("hist_bins", 50))
-    x_min, x_max = float(all_vals.min()), float(all_vals.max())
-    bin_edges = np.linspace(x_min, x_max, bins + 1)
+    # ---------- 1) GLOBAL X RANGE ----------
+    nonempty = [v for v in results_dict.values() if v is not None and len(v) > 0]
+    all_vals = np.concatenate(nonempty) if len(nonempty) > 0 else np.array([0.0, 1.0])
 
-    fig, axes = plt.subplots(1, len(labels), figsize=(5 * len(labels), 4), squeeze=False)
-    fig.suptitle(f"Focus Ratio Distributions - {dataset_name}", fontsize=14, fontweight="bold")
+    x_min = float(np.min(all_vals))
+    x_max = float(np.max(all_vals))
 
-    for i, label in enumerate(labels):
-        ax = axes[0, i]
-        vals = results_dict[label]
-        ax.hist(vals, bins=bin_edges, density=True, edgecolor="black", alpha=0.75)
-        ax.set_title(f"{label} (n={len(vals)})")
-        ax.set_xlabel("Focus Ratio")
-        ax.set_ylabel("Density")
-        ax.grid(True, alpha=0.25)
+    # İstersen sabitle:
+    # x_min, x_max = 0.0, 1.0
 
-        ax.axvline(np.mean(vals), linestyle="--", linewidth=2, label=f"Mean {np.mean(vals):.3f}")
-        ax.axvline(np.median(vals), linestyle="--", linewidth=2, label=f"Median {np.median(vals):.3f}")
-        ax.legend(fontsize=9)
+    # ---------- 2) SAME BINS ----------
+    n_bins = int(CONFIG.get("hist_bins", 50))
+    bin_edges = np.linspace(x_min, x_max, n_bins + 1)
+
+    # ---------- 3) GLOBAL Y RANGE ----------
+    global_ymax = 0.0
+    for label, _, _ in order:
+        vals = results_dict.get(label, np.array([]))
+        if vals is None or len(vals) == 0:
+            continue
+        hist, _ = np.histogram(vals, bins=bin_edges, density=True)
+        global_ymax = max(global_ymax, float(hist.max()))
+    global_ymax *= 1.10 if global_ymax > 0 else 1.0
+
+    colors = {
+        "orijinal": "blue",
+        "reward": "green",
+        "log-reward": "orange",
+        "exp-reward": "red",
+    }
+
+    for label, row, col in order:
+        ax = axes[row, col]
+        ratios = results_dict.get(label, np.array([]))
+        if ratios is None:
+            ratios = np.array([])
+
+        if len(ratios) > 0:
+            ax.hist(
+                ratios,
+                bins=bin_edges,
+                edgecolor='black',
+                alpha=0.7,
+                color=colors.get(label, "gray"),
+                density=True
+            )
+
+            median_val = float(np.median(ratios))
+            mean_val = float(np.mean(ratios))
+
+            ax.axvline(median_val, color='red', linestyle='--', linewidth=2,
+                       label=f'Median: {median_val:.3f}')
+            ax.axvline(mean_val, color='black', linestyle='--', linewidth=2,
+                       label=f'Mean: {mean_val:.3f}')
+
+            ax.set_title(f'{label} (Count: {len(ratios)})', fontsize=13, fontweight='bold')
+            ax.legend(fontsize=10)
+            ax.grid(True, alpha=0.3)
+
+            stats_text = (
+                f'Mean: {mean_val:.3f}\n'
+                f'Median: {median_val:.3f}\n'
+                f'Std: {np.std(ratios):.3f}\n'
+                f'Min: {np.min(ratios):.3f}\n'
+                f'Max: {np.max(ratios):.3f}'
+            )
+            ax.text(0.02, 0.98, stats_text, transform=ax.transAxes,
+                    fontsize=9, verticalalignment='top', family='monospace',
+                    bbox=dict(boxstyle='round', facecolor='wheat', alpha=0.5))
+        else:
+            ax.text(0.5, 0.5, f'No data for {label}',
+                    transform=ax.transAxes, ha='center', va='center', fontsize=14)
+            ax.set_title(label, fontsize=13, fontweight='bold')
+
+        # ---------- 4) FORCE SAME AXES ----------
+        ax.set_xlim(x_min, x_max)
+        ax.set_ylim(0, global_ymax)
+        ax.set_xlabel('Focus Ratio', fontsize=12)
+        ax.set_ylabel('Density', fontsize=12)
 
     plt.tight_layout()
-    plt.savefig(out_path, dpi=300, bbox_inches="tight")
+    plt.savefig(output_path, dpi=300, bbox_inches='tight')
     plt.close()
-    print(f"[SAVE] {out_path}")
+    print(f"[Model Comparison] Histogram saved: {output_path}")
+
 
 
 # ================== SUMMARY SAVE ======================
@@ -206,6 +264,68 @@ def append_jsonl(path, obj):
     with open(path, "a", encoding="utf-8") as f:
         f.write(json.dumps(obj, ensure_ascii=False) + "\n")
 
+def print_summary_table(rows, dataset_name):
+    """
+    rows: list of dicts with keys:
+      model_label, N_face, N_total, threshold_T, P_focus_above_T, delta_P_vs_baseline,
+      mean_focus, median_focus, std_focus
+    """
+    print("\n================= SUMMARY TABLE =================")
+    print(f"Dataset: {dataset_name}")
+    headers = ["Model", "N_face", "N_total", "T", "P(focus>T)", "ΔP", "Mean", "Median", "Std"]
+    colw = [10, 7, 7, 7, 11, 7, 7, 7, 7]
+
+    def fmt_row(vals):
+        return "  ".join(str(v).ljust(w) for v, w in zip(vals, colw))
+
+    print(fmt_row(headers))
+    print(fmt_row(["-"*len(h) for h in headers]))
+
+    for r in rows:
+        vals = [
+            r["model_label"],
+            r["N_face"],
+            r["N_total"],
+            f'{r["threshold_T"]:.4f}',
+            f'{r["P_focus_above_T"]:.4f}',
+            f'{r["delta_P_vs_baseline"]:+.4f}',
+            f'{r["mean_focus"]:.4f}',
+            f'{r["median_focus"]:.4f}',
+            f'{r["std_focus"]:.4f}',
+        ]
+        print(fmt_row(vals))
+
+def print_summary_table_markdown(rows, dataset_name):
+    """
+    rows: list of summary dicts
+    Prints a GitHub/Markdown-compatible table.
+    """
+    print("\n================= SUMMARY TABLE (MARKDOWN) =================")
+    print(f"**Dataset:** `{dataset_name}`\n")
+
+    headers = [
+        "Model", "N_face", "N_total", "T",
+        "P(focus > T)", "ΔP vs baseline",
+        "Mean", "Median", "Std"
+    ]
+
+    # header
+    print("| " + " | ".join(headers) + " |")
+    print("|" + "|".join(["---"] * len(headers)) + "|")
+
+    for r in rows:
+        print(
+            "| "
+            f"{r['model_label']} | "
+            f"{r['N_face']} | "
+            f"{r['N_total']} | "
+            f"{r['threshold_T']:.4f} | "
+            f"{r['P_focus_above_T']:.4f} | "
+            f"{r['delta_P_vs_baseline']:+.4f} | "
+            f"{r['mean_focus']:.4f} | "
+            f"{r['median_focus']:.4f} | "
+            f"{r['std_focus']:.4f} |"
+        )
 
 # ================== MAIN ======================
 if __name__ == "__main__":
@@ -258,6 +378,8 @@ if __name__ == "__main__":
     baseline_ratios = ratios_by_model["orijinal"]
     P_baseline = float(np.mean(baseline_ratios > T))
 
+    summary_rows = []
+
     for label, ratios in ratios_by_model.items():
         if len(ratios) == 0:
             continue
@@ -303,13 +425,18 @@ if __name__ == "__main__":
                 "background_mask_value": cfg["background_mask_value"],
             }
         }
+        summary_rows.append(summary)
 
         append_jsonl(summary_path, summary)
 
     print(f"\n[SAVE] Summary appended to: {summary_path}")
+    print_summary_table(summary_rows, dataset_name)
+    print_summary_table_markdown(summary_rows, dataset_name)
+
 
     # 4) Plot histograms (optional but useful)
     hist_path = os.path.join("artifacts", f"model_focus_comparison_mask_{dataset_name}.png")
-    plot_histograms(ratios_by_model, dataset_name, hist_path)
+    plot_focus_ratio_by_model(ratios_by_model, dataset_name, hist_path)
+
 
     print("\n[DONE]")

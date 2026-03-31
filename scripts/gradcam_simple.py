@@ -20,7 +20,7 @@ from src.losses import create_simple_masked_loss
 # ============================================
 
 # Model path
-MODEL_PATH = os.path.join(project_root, "runs", "30_epoch_with-extended-soft-mask_sbj-gradcam", "models", "final_model.h5")
+MODEL_PATH = os.path.join(project_root, "runs", "30_epoch_without-mask_sbj-gradcam-fixed", "models", "final_model.h5")
 #"30_epoch_without-mask_sbj-gradcam-fixed"
 # Dataset directory
 DATASET_ROOT = os.path.join(project_root, "splitted_dataset")
@@ -29,7 +29,7 @@ DATASET_ROOT = os.path.join(project_root, "splitted_dataset")
 OUTPUT_DIR = None
 
 # Number of samples to process
-NUM_SAMPLES = 30
+NUM_SAMPLES = 54
 
 # Method: "custom" or "tf_keras_vis"
 METHOD = "custom" #"custom" "tf_keras_vis"
@@ -38,7 +38,7 @@ METHOD = "custom" #"custom" "tf_keras_vis"
 SEED = 42
 
 # Save only misclassified samples (FP/FN) if True
-ONLY_FALSE = True
+ONLY_FALSE = False
 
 # ============================================
 # MAIN EXECUTION
@@ -124,4 +124,3 @@ if __name__ == "__main__":
     
     print(f"\n✅ Analysis completed!")
     print(f"📁 Results saved to: {OUTPUT_DIR}")
-

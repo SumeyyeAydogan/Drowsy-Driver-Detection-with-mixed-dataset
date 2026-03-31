@@ -19,8 +19,8 @@ def get_binary_pipelines(
     bg_aug_prob=0.4,           # Probability of applying background augmentation
     bg_aug_face_ratio=0.75,    # Face region ratio (center of image)
     gradcam_weights_path=None,
-    gradcam_weight_scale=0.4,  # Don't scale - weights already optimized by auto_optimize script 1.0
-    gradcam_weight_clip=(0.76, 1.24),  # Match optimized clip range from gradcam_opt_params.json
+    gradcam_weight_scale=1.0,  # Don't scale - weights already optimized by auto_optimize script 04 for exp
+    gradcam_weight_clip=(0.1, 6.9),  # Match optimized clip range from gradcam_opt_params.json 0.76, 1.24 (0.1, 3.4
     #2-3
 ):
     AUTOTUNE = tf.data.AUTOTUNE

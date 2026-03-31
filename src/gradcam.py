@@ -41,7 +41,6 @@ class CustomGradCAM:
             inputs=self.model.input,
             outputs=[self.model.get_layer(self.layer_name).output, self.model.output]
         )
-        self._log(f"[GradCAM] Using layer: {self.layer_name}")
 
     def _log(self, msg):
         print(msg)

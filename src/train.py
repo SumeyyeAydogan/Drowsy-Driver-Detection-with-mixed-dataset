@@ -21,16 +21,21 @@ def train_model(model, train_ds, val_ds, epochs=10, callbacks=None, initial_epoc
     # Compile model
     model.compile(
         optimizer=tf.keras.optimizers.Adam(1e-4),
-        loss=loss_fn,
+        loss=loss_fn, #loss_fn, 'binary_crossentropy'
         metrics=['accuracy'],  # Keep basic accuracy unweighted
-        weighted_metrics=[Precision(name='precision'), Recall(name='recall'), AUC(name='auc')]  # These will use sample_weight
+        weighted_metrics=[Precision(name='precision'), Recall(name='recall'), AUC(name='auc')],  # These will use sample_weight
         #metrics=['accuracy', Precision(name='precision'), Recall(name='recall'), AUC(name='auc')]
+        #run_eagerly=True
     )
     
     # Prepare callbacks
     if callbacks is None:
         callbacks = []
-    
+    """ batch = next(iter(train_ds))
+    print([t.shape for t in batch])  # zaten biliyoruz (32, 224,224,3), (32,1), (32,)
+
+    # Tek batch ile dene:
+    model.train_on_batch(*batch) """
     # Train model
     history = model.fit(
         train_ds,

@@ -187,12 +187,13 @@ def plot_metrics(history, save_path=None):
     
     plt.show()
 
-def save_evaluation_report(report, roc_auc, save_path):
+def save_evaluation_report(report, roc_auc, test_accuracy, test_loss, save_path):
     with open(save_path, "w") as f:
         f.write("=== Classification Report ===\n")
         f.write(report)
         f.write("\n\n=== ROC–AUC Score ===\n")
         f.write(str(roc_auc))
+        f.write(f"REAL Test accuracy: {test_accuracy:.4f}, Test loss: {test_loss:.4f}")
 
 def plot_confusion_matrix(y_true, y_pred, class_names=['NotDrowsy', 'Drowsy'], save_path=None):
     """Plot confusion matrix"""

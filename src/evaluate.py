@@ -93,7 +93,11 @@ def evaluate_model(
     report = classification_report(y_true, y_pred, target_names=class_names)
     er_save_path = os.path.join(plots_dir, f"{ds_name}_evaluation_report.txt") if plots_dir else None
     print(report)
-    save_evaluation_report(report, roc_auc, save_path=er_save_path)
+    eval_results = model.evaluate(test_ds, verbose=0)
+    test_loss = eval_results[0]
+    test_accuracy = eval_results[1]
+    print(f"REAL Test accuracy: {test_accuracy:.4f}, Test loss: {test_loss:.4f}")
+    save_evaluation_report(report, roc_auc, test_accuracy, test_loss, save_path=er_save_path)
 
     
     # 3) Plot confusion matrix

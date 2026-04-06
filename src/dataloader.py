@@ -1,9 +1,7 @@
 import json
 import os
 
-import numpy as np
 import tensorflow as tf
-from src.simple_mask import create_simple_mask_generator
 
 
 def get_binary_pipelines(
@@ -15,9 +13,6 @@ def get_binary_pipelines(
     use_masks=False,
     use_soft_mask=False,
     mask_alpha=0.2,
-    use_background_aug=False,  # Adversarial background augmentation
-    bg_aug_prob=0.4,           # Probability of applying background augmentation
-    bg_aug_face_ratio=0.75,    # Face region ratio (center of image)
     gradcam_weights_path=None,
     gradcam_weight_scale=1.0,  # Don't scale - weights already optimized by auto_optimize script 04 for exp
     gradcam_weight_clip=(0.1, 6.9),  # Match optimized clip range from gradcam_opt_params.json 0.76, 1.24 (0.1, 3.4
@@ -88,25 +83,13 @@ def get_binary_pipelines(
         num_parallel_calls=AUTOTUNE,
     )
 
-    # 4.5) Adversarial background augmentation (train only)
-    if use_background_aug:
-        from src.adversarial_augmentation import RandomBackgroundReplacement
-
-        bg_aug_layer = RandomBackgroundReplacement(
-            prob=bg_aug_prob, face_center_ratio=bg_aug_face_ratio
-        )
-        train_ds = train_ds.map(
-            lambda x, y: (bg_aug_layer(x, training=True), y),
-            num_parallel_calls=AUTOTUNE,
-        )
-
     # 4.6) Clean possible decode/augment errors for train
     # (It is important to do this BEFORE adding weights)
     train_ds = train_ds.apply(tf.data.experimental.ignore_errors())
 
-    # 4.75) GradCAM weights: load only when use_masks=False
+    # 4.75) GradCAM weights (when JSON path is provided)
     gradcam_weights = None
-    if (not use_masks) and gradcam_weights_path:
+    if gradcam_weights_path:
         if os.path.exists(gradcam_weights_path):
             try:
                 with open(gradcam_weights_path, "r", encoding="utf-8") as f:
@@ -142,37 +125,8 @@ def get_binary_pipelines(
 
     # 5) Sample weights logic
     # ------------------------------------------------
-    # CASE A: use_masks = True  → sadece mask-based weights
-    if use_masks:
-        mask_generator = create_simple_mask_generator(
-            img_size, use_soft_mask=use_soft_mask, alpha=mask_alpha
-        )
-
-        def compute_focus_weights(x):
-            masks = mask_generator.generate_mask(x)  # (batch, H, W, 1)
-            eps = tf.constant(1e-8, dtype=x.dtype)
-
-            roi_intensity = tf.reduce_sum(x * masks, axis=[1, 2, 3])
-            total_intensity = tf.reduce_sum(x, axis=[1, 2, 3]) + eps
-
-            focus_ratio = roi_intensity / total_intensity  # (batch,)
-            batch_mean = tf.reduce_mean(focus_ratio) + eps
-
-            sample_weights = focus_ratio / batch_mean
-            sample_weights = tf.maximum(
-                sample_weights, tf.constant(1e-4, dtype=sample_weights.dtype)
-            )
-            return tf.cast(sample_weights, tf.float32)
-
-        def add_mask_weights(x, y):
-            w = compute_focus_weights(x)  # (batch,)
-            return x, y, w
-
-        train_ds = train_ds.map(add_mask_weights, num_parallel_calls=AUTOTUNE)
-        print("[Sample Weights] Using MASK-based static weights")
-
-    # CASE B: use_masks = False ve GradCAM JSON mevcut → GradCAM weights
-    elif gradcam_weights is not None:
+    # GradCAM JSON mevcutsa sample weights uygula
+    if gradcam_weights is not None:
         # 1) train_ds is currently batched: (batch, 224,224,3), (batch,1)
         #    First convert it to per-example
         train_ds = train_ds.unbatch()  # (x_single, y_single)

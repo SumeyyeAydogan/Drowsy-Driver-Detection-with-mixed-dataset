@@ -13,14 +13,15 @@ sys.path.insert(0, project_root)
 
 from src.gradcam_analysis import analyze_subjects_gradcam, analyze_tf_keras_gradcam
 from src.dataloader import get_binary_pipelines
+from src.losses import create_simple_masked_loss
 
 # ============================================
 # CONFIGURATION - Modify these as needed
 # ============================================
 
 # Model path
-MODEL_PATH = os.path.join(project_root, "runs", "20_epoch", "models", "final_model.h5")
-
+MODEL_PATH = os.path.join(project_root, "runs", "30_epoch_without-mask_sbj-gradcam-fixed", "models", "final_model.h5")
+#"30_epoch_without-mask_sbj-gradcam-fixed"
 # Dataset directory
 DATASET_ROOT = os.path.join(project_root, "splitted_dataset")
 
@@ -28,13 +29,16 @@ DATASET_ROOT = os.path.join(project_root, "splitted_dataset")
 OUTPUT_DIR = None
 
 # Number of samples to process
-NUM_SAMPLES = 30
+NUM_SAMPLES = 54
 
 # Method: "custom" or "tf_keras_vis"
-METHOD = "custom"
+METHOD = "custom" #"custom" "tf_keras_vis"
 
 # Random seed
 SEED = 42
+
+# Save only misclassified samples (FP/FN) if True
+ONLY_FALSE = False
 
 # ============================================
 # MAIN EXECUTION
@@ -47,7 +51,14 @@ if __name__ == "__main__":
     # Load model
     print(f"📂 Loading model: {MODEL_PATH}")
     try:
-        model = tf.keras.models.load_model(MODEL_PATH)
+        # Create custom loss function for loading
+        loss_fn = create_simple_masked_loss()
+        
+        # Load model with custom objects
+        model = tf.keras.models.load_model(
+            MODEL_PATH,
+            custom_objects={'loss_fn': loss_fn}
+        )
         print("✅ Model loaded successfully!")
     except Exception as e:
         print(f"❌ Failed to load model: {e}")
@@ -63,7 +74,8 @@ if __name__ == "__main__":
         
         method_suffix = "tf_keras" if METHOD == "tf_keras_vis" else "custom"
         OUTPUT_DIR = os.path.join(run_root, f"gradcam_{method_suffix}")
-    
+        if ONLY_FALSE:
+            OUTPUT_DIR = f"{OUTPUT_DIR}_missclassified"
     print(f"📁 Output directory: {OUTPUT_DIR}")
     
     # Run analysis based on method
@@ -79,7 +91,8 @@ if __name__ == "__main__":
                 output_dir=OUTPUT_DIR,
                 num_samples=NUM_SAMPLES,
                 class_names=tuple(class_names),
-                seed=SEED
+                seed=SEED,
+                include_buckets=("FP", "FN") if ONLY_FALSE else None
             )
         except ImportError as e:
             print(f"❌ Error: {e}")
@@ -102,7 +115,8 @@ if __name__ == "__main__":
                 test_dir=test_dir,
                 output_dir=OUTPUT_DIR,
                 num_samples=NUM_SAMPLES,
-                seed=SEED
+                seed=SEED,
+                include_buckets=("FP", "FN") if ONLY_FALSE else None
             )
         except Exception as e:
             print(f"❌ Error during analysis: {e}")
@@ -110,4 +124,3 @@ if __name__ == "__main__":
     
     print(f"\n✅ Analysis completed!")
     print(f"📁 Results saved to: {OUTPUT_DIR}")
-

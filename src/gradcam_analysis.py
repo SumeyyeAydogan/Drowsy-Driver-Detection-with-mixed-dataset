@@ -29,7 +29,8 @@ def analyze_subjects_gradcam(
     class_names=('NotDrowsy', 'Drowsy'),
     img_size=(224, 224),
     seed=42,
-    log_file=None
+    log_file=None,
+    include_buckets=None
 ):
     """Run subject-wise GradCAM analysis and save TP/TN/FP/FN examples."""
     rng = np.random.default_rng(seed)
@@ -61,38 +62,56 @@ def analyze_subjects_gradcam(
     rng.shuffle(subjects)
     cam._log(f"📂 Found {len(subjects)} subjects")
 
-    for sub in ("TP", "TN", "FP", "FN"):
+    buckets = ("TP", "TN", "FP", "FN")
+    if include_buckets is not None:
+        include_set = set(include_buckets)
+        buckets = tuple([b for b in buckets if b in include_set])
+    for sub in buckets:
         os.makedirs(os.path.join(output_dir, sub), exist_ok=True)
 
-    processed = 0
+    saved = 0
+    sample_counter = {}  # Track sample count per bucket for unique filenames
+    
+    # Process all subjects - one sample per subject for diversity
     for subj in subjects:
-        if processed >= num_samples:
+        if saved >= num_samples:
             break
-        path, true_label = subj_to_samples[subj][rng.integers(0, len(subj_to_samples[subj]))]
-        img = tf.keras.utils.load_img(path, target_size=img_size)
-        img_arr = tf.keras.utils.img_to_array(img) / 255.0
+        # Try all samples of the subject in random order until we find a desired bucket
+        samples = list(subj_to_samples[subj])
+        rng.shuffle(samples)
+        found_one = False  # Track if we found a valid sample from this subject
+        for path, true_label in samples:
+            if saved >= num_samples or found_one:
+                break
+            img = tf.keras.utils.load_img(path, target_size=img_size)
+            img_arr = tf.keras.utils.img_to_array(img) / 255.0
 
-        preds = model.predict(img_arr[None, ...], verbose=0)
-        prob = float(preds[0][0])
-        pred_cls = 1 if prob >= 0.5 else 0
-        disp_prob = prob if pred_cls == 1 else (1.0 - prob)
+            preds = model.predict(img_arr[None, ...], verbose=0)
+            prob = float(preds[0][0])
+            pred_cls = 1 if prob >= 0.5 else 0
+            disp_prob = prob if pred_cls == 1 else (1.0 - prob)
 
-        if true_label == 1 and pred_cls == 1:
-            bucket = "TP"
-        elif true_label == 0 and pred_cls == 0:
-            bucket = "TN"
-        elif true_label == 0 and pred_cls == 1:
-            bucket = "FP"
-        else:
-            bucket = "FN"
+            if true_label == 1 and pred_cls == 1:
+                bucket = "TP"
+            elif true_label == 0 and pred_cls == 0:
+                bucket = "TN"
+            elif true_label == 0 and pred_cls == 1:
+                bucket = "FP"
+            else:
+                bucket = "FN"
 
-        out_path = os.path.join(output_dir, bucket, f"{subj}.png")
-        cam.visualize(img_arr, class_names, true_idx=true_label, save_path=out_path)
-        cam._log(f"🧍 {subj}: Truth={class_names[true_label]}, Pred={class_names[pred_cls]} "
-                 f"({disp_prob:.2f}) -> {bucket}")
-        processed += 1
+            if include_buckets is None or bucket in include_buckets:
+                # Create unique filename with counter
+                sample_counter[bucket] = sample_counter.get(bucket, 0) + 1
+                fname_base = os.path.splitext(os.path.basename(path))[0]
+                out_path = os.path.join(output_dir, bucket, f"{fname_base}_{sample_counter[bucket]:03d}.png")
+                cam.visualize(img_arr, class_names, true_idx=true_label, save_path=out_path)
+                cam._log(f"🧍 {subj}: Truth={class_names[true_label]}, Pred={class_names[pred_cls]} "
+                         f"({disp_prob:.2f}) -> {bucket}")
+                saved += 1
+                found_one = True  # Only one sample per subject for diversity
 
-    cam._log(f"✅ GradCAM analysis completed ({processed} subjects). Results: {output_dir}")
+    cam._log(f"✅ GradCAM analysis completed (saved {saved} samples). Results: {output_dir}")
 
 
 def analyze_tf_keras_gradcam(
@@ -102,7 +121,8 @@ def analyze_tf_keras_gradcam(
     num_samples=30,
     class_names=('NotDrowsy', 'Drowsy'),
     seed=42,
-    log_file=None
+    log_file=None,
+    include_buckets=None
 ):
     """
     Run subject-wise GradCAM analysis using tf-keras-vis library.
@@ -132,7 +152,11 @@ def analyze_tf_keras_gradcam(
         print(msg)
     
     # Create output directories
-    for sub in ["TP", "TN", "FP", "FN"]:
+    buckets = ("TP", "TN", "FP", "FN")
+    if include_buckets is not None:
+        include_set = set(include_buckets)
+        buckets = tuple([b for b in buckets if b in include_set])
+    for sub in buckets:
         os.makedirs(os.path.join(output_dir, sub), exist_ok=True)
     
     # Prepare GradCAM (with linearized top for proper gradients)
@@ -153,7 +177,15 @@ def analyze_tf_keras_gradcam(
     
     # Collect all samples and shuffle for diversity
     all_samples = []
-    for batch_images, batch_labels in test_ds:
+    for batch in test_ds:
+        # Handle both formats: (x, y) or (x, y, sample_weight)
+        if isinstance(batch, (tuple, list)) and len(batch) == 3:
+            batch_images, batch_labels, _ = batch
+        elif isinstance(batch, (tuple, list)) and len(batch) == 2:
+            batch_images, batch_labels = batch
+        else:
+            raise ValueError(f"Unexpected batch structure: {type(batch)}")
+
         for i in range(len(batch_images)):
             all_samples.append((batch_images[i].numpy(), int(batch_labels[i].numpy())))
     
@@ -204,35 +236,36 @@ def analyze_tf_keras_gradcam(
         else:
             bucket = "FN"
         
-        # Save combined figure with overlay text on Original
-        fig, axes = plt.subplots(1, 3, figsize=(15, 5))
-        axes[0].imshow(orig_vis)
-        overlay_text = f"Truth: {class_names[y_true]} | Pred: {class_names[y_pred]} ({prob_display:.3f})"
-        axes[0].text(
-            5, 15, overlay_text,
-            color='white', fontsize=10,
-            bbox=dict(facecolor='black', alpha=0.6, edgecolor='none')
-        )
-        axes[0].set_title("Original")
-        axes[0].axis('off')
-        im1 = axes[1].imshow(heatmap_norm, cmap='jet')
-        axes[1].set_title("Heatmap")
-        axes[1].axis('off')
-        plt.colorbar(im1, ax=axes[1])
-        axes[2].imshow(overlay)
-        axes[2].set_title("Overlay")
-        axes[2].axis('off')
-        plt.tight_layout()
-        
-        out_path = os.path.join(output_dir, bucket, f"example_{idx_global:04d}_p{y_pred}_t{y_true}.png")
-        fig.savefig(out_path, dpi=200, bbox_inches='tight')
-        plt.close(fig)
-        
-        if saved < 5:  # Log first few samples
-            _log(f"  Sample {saved}: Truth={class_names[y_true]}, Pred={class_names[y_pred]} "
-                 f"({prob_display:.3f}) -> {bucket}")
-        
-        saved += 1
+        if include_buckets is None or bucket in include_buckets:
+            # Save combined figure with overlay text on Original
+            fig, axes = plt.subplots(1, 3, figsize=(15, 5))
+            axes[0].imshow(orig_vis)
+            overlay_text = f"Truth: {class_names[y_true]} | Pred: {class_names[y_pred]} ({prob_display:.3f})"
+            axes[0].text(
+                5, 15, overlay_text,
+                color='white', fontsize=10,
+                bbox=dict(facecolor='black', alpha=0.6, edgecolor='none')
+            )
+            axes[0].set_title("Original")
+            axes[0].axis('off')
+            im1 = axes[1].imshow(heatmap_norm, cmap='jet')
+            axes[1].set_title("Heatmap")
+            axes[1].axis('off')
+            plt.colorbar(im1, ax=axes[1])
+            axes[2].imshow(overlay)
+            axes[2].set_title("Overlay")
+            axes[2].axis('off')
+            plt.tight_layout()
+
+            out_path = os.path.join(output_dir, bucket, f"example_{idx_global:04d}_p{y_pred}_t{y_true}.png")
+            fig.savefig(out_path, dpi=200, bbox_inches='tight')
+            plt.close(fig)
+
+            if saved < 5:  # Log first few samples
+                _log(f"  Sample {saved}: Truth={class_names[y_true]}, Pred={class_names[y_pred]} "
+                     f"({prob_display:.3f}) -> {bucket}")
+
+            saved += 1
     
     if saved == 0:
         _log("⚠️  No samples were processed. Check the dataset or num_samples.")

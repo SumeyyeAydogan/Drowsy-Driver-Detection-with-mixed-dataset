@@ -1,20 +1,41 @@
 import tensorflow as tf
-from tensorflow.keras.metrics import BinaryAccuracy, Precision, Recall, AUC
+from tensorflow.keras.metrics import Precision, Recall, AUC
+from src.losses import create_simple_masked_loss
+
 def train_model(model, train_ds, val_ds, epochs=10, callbacks=None, initial_epoch=0):
     """
-    Train the model with custom callbacks support
+    Train the model with custom callbacks and sample_weight support.
+    
+    Args:
+        model: Keras model to train
+        train_ds: Training dataset (should return (x, y, sample_weight) tuples)
+        val_ds: Validation dataset  
+        epochs: Number of training epochs
+        callbacks: List of Keras callbacks
+        initial_epoch: Starting epoch number
     """
+
+    # Use standard loss with sample_weight support
+    loss_fn = create_simple_masked_loss()
+
     # Compile model
     model.compile(
         optimizer=tf.keras.optimizers.Adam(1e-4),
-        loss='binary_crossentropy',
-        metrics=['accuracy', Precision(name='precision'), Recall(name='recall'), AUC(name='auc')]
+        loss=loss_fn, #loss_fn, 'binary_crossentropy'
+        metrics=['accuracy'],  # Keep basic accuracy unweighted
+        weighted_metrics=[Precision(name='precision'), Recall(name='recall'), AUC(name='auc')],  # These will use sample_weight
+        #metrics=['accuracy', Precision(name='precision'), Recall(name='recall'), AUC(name='auc')]
+        #run_eagerly=True it was releated to sample_weight but we don't need it anymore thanks to graph-safe solution
     )
     
     # Prepare callbacks
     if callbacks is None:
         callbacks = []
-    
+    """ batch = next(iter(train_ds))
+    print([t.shape for t in batch])  # zaten biliyoruz (32, 224,224,3), (32,1), (32,)
+
+    # Tek batch ile dene:
+    model.train_on_batch(*batch) """
     # Train model
     history = model.fit(
         train_ds,

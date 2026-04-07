@@ -10,9 +10,6 @@ def get_binary_pipelines(
     batch_size=16,
     seed=42,
     class_names=("NotDrowsy", "Drowsy"),
-    use_masks=False,
-    use_soft_mask=False,
-    mask_alpha=0.2,
     gradcam_weights_path=None,
     gradcam_weight_scale=1.0,  # Don't scale - weights already optimized by auto_optimize script 04 for exp
     gradcam_weight_clip=(0.1, 6.9),  # Match optimized clip range from gradcam_opt_params.json 0.76, 1.24 (0.1, 3.4

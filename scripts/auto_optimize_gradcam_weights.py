@@ -21,14 +21,15 @@ import tensorflow as tf
 from pathlib import Path
 from statistics import median
 import matplotlib.pyplot as plt
-from PIL import Image, ImageDraw
-import mediapipe as mp
 
 # Add root path
 project_root = Path(__file__).parent.parent
 sys.path.insert(0, str(project_root))
 
 from src.gradcam import CustomGradCAM
+from src.analysis_pipeline import get_analysis_pipeline
+from src.focus_metrics import compute_focus_ratio
+from src.mask_helpers import create_landmark_mask, create_static_mask
 
 
 # ================== CONFIG ======================
@@ -37,7 +38,6 @@ CONFIG = {
     #"model_path": r"runs/30_epoch_exp-sw-gradcam-reward-landmark-soft/models/final_model.h5",
     "data_dir": r"splitted_dataset/train",
     "img_size": (224, 224),
-    "use_landmark_mask": True,  # Use dynamic landmark mask instead of static mask
     "landmark_box_half_size": 12,  # Half side-length of square patches around landmarks
     "fallback_to_static": True,     # If landmark detection fails, use static mask
     "background_mask_value": 0.2,  # Background value for non-ROI regions (0.0 = hard mask, 0.2 = soft mask)
@@ -56,126 +56,6 @@ CONFIG = {
     # "penalize": Low focus ratio → High weight (penalize bad behavior)
 }
 
-# MediaPipe FaceMesh initialization
-mp_face_mesh = mp.solutions.face_mesh.FaceMesh(
-    static_image_mode=True,
-    max_num_faces=1,
-    refine_landmarks=True,
-    min_detection_confidence=0.5,
-)
-
-# Landmark indices for eyes and mouth (MediaPipe FaceMesh)
-LEFT_EYE_IDX = [33, 7, 163, 144, 145, 153, 154, 155, 133]
-RIGHT_EYE_IDX = [263, 249, 390, 373, 374, 380, 381, 382, 362]
-MOUTH_IDX = [78, 191, 80, 81, 82, 13, 312, 311, 310, 415, 308]
-
-
-# ================== MASK ======================
-def create_landmark_mask(image_np, img_size):
-    """
-    Create dynamic landmark-based mask for a single image.
-    
-    Args:
-        image_np: (H, W, 3) RGB uint8 numpy array (already at img_size)
-        img_size: Target image size (height, width)
-    
-    Returns:
-        (H, W) float32 mask where background = background_mask_value, ROI = 1.0
-        Returns None if no face detected
-    """
-    h, w = img_size
-    background_value = CONFIG.get("background_mask_value", 0.0)
-    
-    # MediaPipe expects RGB uint8 array
-    # Note: image_np should already be at img_size from TensorFlow dataset
-    results = mp_face_mesh.process(image_np)
-    
-    if not results.multi_face_landmarks:
-        # No face detected - return None to use fallback
-        return None
-    
-    face = results.multi_face_landmarks[0]
-    
-    # Create mask at target size with background value
-    # PIL uses 0-255 range, so convert background_value (0-1) to 0-255
-    bg_pil_value = int(background_value * 255)
-    pil_mask = Image.new("L", (w, h), bg_pil_value)
-    draw = ImageDraw.Draw(pil_mask)
-    
-    # Get boxes for all landmarks
-    # MediaPipe landmarks are normalized (0-1), so multiply by image dimensions
-    box_half_size = CONFIG["landmark_box_half_size"]
-    boxes = []
-    for idx_list in [LEFT_EYE_IDX, RIGHT_EYE_IDX, MOUTH_IDX]:
-        for i in idx_list:
-            lm = face.landmark[i]
-            # Convert normalized coordinates to pixel coordinates
-            cx = int(lm.x * w)
-            cy = int(lm.y * h)
-            x0 = max(0, cx - box_half_size)
-            y0 = max(0, cy - box_half_size)
-            x1 = min(w - 1, cx + box_half_size)
-            y1 = min(h - 1, cy + box_half_size)
-            boxes.append((x0, y0, x1, y1))
-    
-    # Draw boxes with value 255 (will be normalized to 1.0)
-    for (x0, y0, x1, y1) in boxes:
-        draw.rectangle([x0, y0, x1, y1], outline=255, fill=255)
-    
-    # Convert to float32 and normalize to 0-1 range
-    mask = np.array(pil_mask, dtype=np.float32) / 255.0
-    return mask
-
-
-def create_static_mask_fallback(img_size):
-    """
-    Create static mask as fallback when landmark detection fails.
-    Uses same logic as src/simple_mask.py.
-    """
-    h, w = img_size
-    background_value = CONFIG.get("background_mask_value", 0.0)
-    
-    # Define regions (same as simple_mask.py)
-    eye_top = int(0.2 * h)
-    eye_bottom = int(0.53 * h)
-    eye_left = int(0.1 * w)
-    eye_right = int(0.9 * w)
-    
-    mouth_top = int(0.57 * h)
-    mouth_bottom = int(0.9 * h)
-    mouth_left = int(0.2 * w)
-    mouth_right = int(0.8 * w)
-    
-    # Mask: ROI = 1.0, background = background_value
-    mask = np.ones((h, w), dtype=np.float32) * background_value
-    
-    # Eye region
-    mask[eye_top:eye_bottom, eye_left:eye_right] = 1.0
-    
-    # Mouth region
-    mask[mouth_top:mouth_bottom, mouth_left:mouth_right] = 1.0
-    
-    return mask
-
-def compute_focus_ratio(heatmap, mask):
-    """
-    Compute focus ratio: how much of the heatmap is in the ROI mask.
-    
-    Args:
-        heatmap: Normalized heatmap (0-1)
-        mask: ROI mask (0-1)
-    
-    Returns:
-        Focus ratio (0-1): higher = more focus on ROI
-    """
-    heatmap = np.maximum(heatmap, 0)  # Ensure non-negative
-    if heatmap.max() > 0:
-        heatmap = heatmap / (heatmap.max() + 1e-8)  # Normalize to 0-1
-    focus = np.sum(heatmap * mask)      # ROI'deki toplam heatmap
-    total = np.sum(heatmap) + 1e-8      # Tüm heatmap toplamı
-    return float(focus / total)
-
-
 # ================== CORE ======================
 def collect_focus_distribution(model, data_dir, img_size):
     """
@@ -188,24 +68,16 @@ def collect_focus_distribution(model, data_dir, img_size):
     """
     gradcam = CustomGradCAM(model)
 
-    ds = tf.keras.utils.image_dataset_from_directory(
-        data_dir, labels="inferred", label_mode="binary",
-        image_size=img_size, batch_size=1, shuffle=False
-    )
-    file_paths = list(getattr(ds, "file_paths", []))
-    path_ds = tf.data.Dataset.from_tensor_slices(file_paths).batch(1)
-    ds = tf.data.Dataset.zip((ds, path_ds))
-    ds = ds.apply(tf.data.experimental.ignore_errors())
+    ds, file_paths = get_analysis_pipeline(data_dir, img_size)
 
     ratios = []
     landmark_success_count = 0
     static_fallback_count = 0
 
     print("[AutoOpt] Computing focus distribution...")
-    print(f"[AutoOpt] Using {'landmark mask' if CONFIG['use_landmark_mask'] else 'static mask'}")
-    if CONFIG['use_landmark_mask']:
-        print(f"[AutoOpt] Landmark box half-size: {CONFIG['landmark_box_half_size']}")
-        print(f"[AutoOpt] Fallback to static: {CONFIG['fallback_to_static']}")
+    print("[AutoOpt] Using landmark mask with optional static fallback")
+    print(f"[AutoOpt] Landmark box half-size: {CONFIG['landmark_box_half_size']}")
+    print(f"[AutoOpt] Fallback to static: {CONFIG['fallback_to_static']}")
 
     for idx, (data_batch, path_batch) in enumerate(ds):
         images, labels = data_batch
@@ -227,23 +99,25 @@ def collect_focus_distribution(model, data_dir, img_size):
             antialias=True      # Anti-aliasing for smoother resize
         ).numpy()[..., 0]
 
-        # Create dynamic landmark mask for this image
-        if CONFIG['use_landmark_mask']:
-            mask = create_landmark_mask(image_uint8, img_size)
-            if mask is None:
-                # Landmark detection failed - use fallback
-                if CONFIG['fallback_to_static']:
-                    mask = create_static_mask_fallback(img_size)
-                    static_fallback_count += 1
-                else:
-                    # Skip this image if no fallback
-                    print(f"[WARN] No face detected in image {idx+1}, skipping...")
-                    continue
+        mask = create_landmark_mask(
+            image_uint8,
+            img_size,
+            background_value=float(CONFIG.get("background_mask_value", 0.0)),
+            landmark_box_half_size=int(CONFIG.get("landmark_box_half_size", 12)),
+        )
+        if mask is None:
+            if CONFIG['fallback_to_static']:
+                mask = create_static_mask(
+                    img_size,
+                    background_value=float(CONFIG.get("background_mask_value", 0.0)),
+                )
+                static_fallback_count += 1
             else:
-                landmark_success_count += 1
+                # Skip this image if no fallback
+                print(f"[WARN] No face detected in image {idx+1}, skipping...")
+                continue
         else:
-            # Use static mask
-            mask = create_static_mask_fallback(img_size)
+            landmark_success_count += 1
 
         ratio = compute_focus_ratio(heatmap, mask)
         ratios.append(ratio)
@@ -575,11 +449,9 @@ if __name__ == "__main__":
             f.write(f"  {key.capitalize()}: {value:.3f}\n")
         f.write(f"\nTotal Samples: {len(ratios)}\n")
         f.write(f"\nMask Configuration:\n")
-        f.write(f"  Use Landmark Mask: {cfg['use_landmark_mask']}\n")
         f.write(f"  Background Mask Value: {cfg.get('background_mask_value', 0.0):.2f}\n")
-        if cfg['use_landmark_mask']:
-            f.write(f"  Landmark Box Half-Size: {cfg['landmark_box_half_size']}\n")
-            f.write(f"  Fallback to Static: {cfg['fallback_to_static']}\n")
+        f.write(f"  Landmark Box Half-Size: {cfg['landmark_box_half_size']}\n")
+        f.write(f"  Fallback to Static: {cfg['fallback_to_static']}\n")
         f.write(f"\nWeight Optimization Configuration:\n")
         f.write(f"  Alpha Range: [{cfg.get('alpha_min', 0.3):.2f}, {cfg.get('alpha_max', 3.0):.2f}]\n")
         f.write(f"  Clip Range Factor: {cfg.get('clip_range_factor', 0.8):.2f}\n")

@@ -27,12 +27,17 @@ from __future__ import annotations
 
 import os
 from pathlib import Path
-from typing import Iterable, List
+from typing import List
 
 import numpy as np
-from PIL import Image, ImageDraw, UnidentifiedImageError
+from PIL import Image, UnidentifiedImageError
 
-import mediapipe as mp
+import sys
+
+project_root = Path(__file__).parent.parent
+sys.path.insert(0, str(project_root))
+
+from src.mask_helpers import create_landmark_mask
 
 
 # ------------ CONFIG ------------
@@ -51,73 +56,6 @@ BACKGROUND_VALUE = 0.0  # you can set 0.2, 0.5, etc. if you want gray background
 # Half side-length (in pixels) of square patches drawn around each landmark.
 # Effective square size = (2 * BOX_HALF_SIZE + 1) x (2 * BOX_HALF_SIZE + 1)
 BOX_HALF_SIZE = 12
-
-
-mp_face_mesh = mp.solutions.face_mesh.FaceMesh(
-    static_image_mode=True,
-    max_num_faces=1,
-    refine_landmarks=True,
-    min_detection_confidence=0.5,
-)
-
-# Example landmark index sets for eyes + mouth (MediaPipe FaceMesh)
-# You can tweak these if you want larger/smaller regions.
-LEFT_EYE_IDX: List[int] = [33, 7, 163, 144, 145, 153, 154, 155, 133]
-RIGHT_EYE_IDX: List[int] = [263, 249, 390, 373, 374, 380, 381, 382, 362]
-MOUTH_IDX: List[int] = [78, 191, 80, 81, 82, 13, 312, 311, 310, 415, 308]
-
-ROI_IDX = LEFT_EYE_IDX + RIGHT_EYE_IDX + MOUTH_IDX
-def _landmarks_to_boxes(face_landmarks, idxs: Iterable[int], w: int, h: int) -> List[tuple]:
-    """
-    Convert selected landmark indices to square boxes in image coordinates.
-
-    Each landmark becomes a square centered at (x, y) with side
-    length (2 * BOX_HALF_SIZE + 1). Returns list of
-    (x0, y0, x1, y1) boxes clipped to image bounds.
-    """
-    boxes: List[tuple] = []
-    for i in idxs:
-        lm = face_landmarks.landmark[i]
-        cx = int(lm.x * w)
-        cy = int(lm.y * h)
-        x0 = max(0, cx - BOX_HALF_SIZE)
-        y0 = max(0, cy - BOX_HALF_SIZE)
-        x1 = min(w - 1, cx + BOX_HALF_SIZE)
-        y1 = min(h - 1, cy + BOX_HALF_SIZE)
-        boxes.append((x0, y0, x1, y1))
-    return boxes
-
-
-def create_eye_mouth_mask(image_np: np.ndarray, face_landmarks) -> np.ndarray:
-    """
-    image_np: (H, W, 3) RGB uint8
-    face_landmarks: mp_face_mesh result for a single face
-
-    Returns:
-        (H, W) float32 mask in {0, 1} where:
-            1 = eye + mouth regions
-            0 = everything else
-    """
-    h, w = image_np.shape[:2]
-
-    # Start with all zeros, then fill landmark-centered boxes with 1
-    pil_mask = Image.new("L", (w, h), 0)
-    draw = ImageDraw.Draw(pil_mask)
-
-    boxes = (
-        _landmarks_to_boxes(face_landmarks, ROI_IDX, w, h)
-        # _landmarks_to_boxes(face_landmarks, LEFT_EYE_IDX, w, h)
-        # + _landmarks_to_boxes(face_landmarks, RIGHT_EYE_IDX, w, h)
-        # + _landmarks_to_boxes(face_landmarks, MOUTH_IDX, w, h)
-    )
-
-    for (x0, y0, x1, y1) in boxes:
-        # rectangle includes both corners; this will make a solid square area = 1
-        draw.rectangle([x0, y0, x1, y1], outline=1, fill=1)
-
-    mask = np.array(pil_mask, dtype=np.float32)  # 0 or 1
-    return mask
-
 
 def apply_mask_to_image(img: Image.Image, mask: np.ndarray) -> Image.Image:
     """
@@ -147,18 +85,18 @@ def process_one_image(src_path: Path, dst_path: Path) -> None:
         return  # veya: dst_path.parent.mkdir(...); shutil.copy(src_path, dst_path); return
     img_np = np.array(img)  # RGB uint8
 
-    # MediaPipe expects RGB uint8 array
-    results = mp_face_mesh.process(img_np)
-
-    if not results.multi_face_landmarks:
+    mask = create_landmark_mask(
+        img_np,
+        img_np.shape[:2],
+        background_value=0.0,
+        landmark_box_half_size=BOX_HALF_SIZE,
+    )
+    if mask is None:
         # If no face is found, simply copy the original image.
         dst_path.parent.mkdir(parents=True, exist_ok=True)
         img.save(dst_path)
         print(f"[WARN] No face detected, copied original: {src_path}")
         return
-
-    face = results.multi_face_landmarks[0]
-    mask = create_eye_mouth_mask(img_np, face)  # (H, W) in {0, 1}
 
     masked_img = apply_mask_to_image(img, mask)
 

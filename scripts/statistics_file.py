@@ -3,14 +3,15 @@ import numpy as np
 import tensorflow as tf
 from pathlib import Path
 import matplotlib.pyplot as plt
-from PIL import Image, ImageDraw
-import mediapipe as mp
 
 # Add root path
 project_root = Path(__file__).parent.parent
 sys.path.insert(0, str(project_root))
 
 from src.gradcam import CustomGradCAM
+from src.analysis_pipeline import get_analysis_pipeline
+from src.focus_metrics import compute_focus_ratio
+from src.mask_helpers import create_landmark_mask
 
 
 # ================== CONFIG ======================
@@ -21,100 +22,11 @@ CONFIG = {
     "img_size": (224, 224),
     "model_name": "original model",  # Model name for histogram title
     "dataset_name": "test",  # Dataset name for histogram title
-    "use_landmark_mask": True,  # Use dynamic landmark mask
     "landmark_box_half_size": 12,  # Half side-length of square patches around landmarks
     "background_mask_value": 0.2,  # Background value for non-ROI regions (0.0 = hard mask, 0.2 = soft mask)
 }
 
-# MediaPipe FaceMesh initialization
-mp_face_mesh = mp.solutions.face_mesh.FaceMesh(
-    static_image_mode=True,
-    max_num_faces=1,
-    refine_landmarks=True,
-    min_detection_confidence=0.5,
-)
-
-# Landmark indices for eyes and mouth (MediaPipe FaceMesh)
-LEFT_EYE_IDX = [33, 7, 163, 144, 145, 153, 154, 155, 133]
-RIGHT_EYE_IDX = [263, 249, 390, 373, 374, 380, 381, 382, 362]
-MOUTH_IDX = [78, 191, 80, 81, 82, 13, 312, 311, 310, 415, 308]
-
-# Combined ROI indices (eyes + mouth)
-ROI_IDX = LEFT_EYE_IDX + RIGHT_EYE_IDX + MOUTH_IDX
-
 # ================== MASK ======================
-def create_landmark_mask(image_np, img_size):
-    """
-    Create dynamic landmark-based mask for a single image.
-    
-    Args:
-        image_np: (H, W, 3) RGB uint8 numpy array (already at img_size)
-        img_size: Target image size (height, width)
-    
-    Returns:
-        (H, W) float32 mask where background = background_mask_value, ROI = 1.0
-        Returns None if no face detected
-    """
-    h, w = img_size
-    background_value = CONFIG.get("background_mask_value", 0.0)
-    
-    # MediaPipe expects RGB uint8 array
-    # Note: image_np should already be at img_size from TensorFlow dataset
-    results = mp_face_mesh.process(image_np)
-    
-    if not results.multi_face_landmarks:
-        # No face detected - return None
-        return None
-    
-    face = results.multi_face_landmarks[0]
-    
-    # Create mask at target size with background value
-    # PIL uses 0-255 range, so convert background_value (0-1) to 0-255
-    bg_pil_value = int(background_value * 255)
-    pil_mask = Image.new("L", (w, h), bg_pil_value)
-    draw = ImageDraw.Draw(pil_mask)
-    
-    # Get boxes for all landmarks
-    # MediaPipe landmarks are normalized (0-1), so multiply by image dimensions
-    box_half_size = CONFIG["landmark_box_half_size"]
-    boxes = []
-    for i in ROI_IDX:
-        lm = face.landmark[i]
-        # Convert normalized coordinates to pixel coordinates
-        cx = int(lm.x * w)
-        cy = int(lm.y * h)
-        x0 = max(0, cx - box_half_size)
-        y0 = max(0, cy - box_half_size)
-        x1 = min(w - 1, cx + box_half_size)
-        y1 = min(h - 1, cy + box_half_size)
-        boxes.append((x0, y0, x1, y1))
-    
-    # Draw boxes with value 255 (will be normalized to 1.0)
-    for (x0, y0, x1, y1) in boxes:
-        draw.rectangle([x0, y0, x1, y1], outline=255, fill=255)
-    
-    # Convert to float32 and normalize to 0-1 range
-    mask = np.array(pil_mask, dtype=np.float32) / 255.0
-    return mask
-
-def compute_focus_ratio(heatmap, mask):
-    """
-    Compute focus ratio: how much of the heatmap is in the ROI mask.
-    
-    Args:
-        heatmap: Normalized heatmap (0-1)
-        mask: ROI mask (0-1)
-    
-    Returns:
-        Focus ratio (0-1): higher = more focus on ROI
-    """
-    heatmap = np.maximum(heatmap, 0)  # Ensure non-negative
-    if heatmap.max() > 0:
-        heatmap = heatmap / (heatmap.max() + 1e-8)  # Normalize to 0-1
-    focus = np.sum(heatmap * mask)      # ROI'deki toplam heatmap
-    total = np.sum(heatmap) + 1e-8      # Tüm heatmap toplamı
-    return float(focus / total)
-
 
 # ================== CORE ======================
 def collect_focus_distribution_with_predictions(model, data_dir, img_size):
@@ -129,15 +41,7 @@ def collect_focus_distribution_with_predictions(model, data_dir, img_size):
     """
     gradcam = CustomGradCAM(model)
 
-    ds = tf.keras.utils.image_dataset_from_directory(
-        data_dir, labels="inferred", label_mode="binary",
-        class_names=["NotDrowsy", "Drowsy"],  # Explicit class order: NotDrowsy=0, Drowsy=1
-        image_size=img_size, batch_size=1, shuffle=False
-    )
-    file_paths = list(getattr(ds, "file_paths", []))
-    path_ds = tf.data.Dataset.from_tensor_slices(file_paths).batch(1)
-    ds = tf.data.Dataset.zip((ds, path_ds))
-    ds = ds.apply(tf.data.experimental.ignore_errors())
+    ds, file_paths = get_analysis_pipeline(data_dir, img_size)
 
     y_true = []
     y_pred = []
@@ -176,11 +80,14 @@ def collect_focus_distribution_with_predictions(model, data_dir, img_size):
         ).numpy()[..., 0]
 
         # Create dynamic landmark mask for this image
-        mask = None
-        if CONFIG['use_landmark_mask']:
-            mask = create_landmark_mask(image_uint8, img_size)
-            if mask is not None:
-                landmark_success_count += 1
+        mask = create_landmark_mask(
+            image_uint8,
+            img_size,
+            background_value=float(CONFIG.get("background_mask_value", 0.0)),
+            landmark_box_half_size=int(CONFIG.get("landmark_box_half_size", 12)),
+        )
+        if mask is not None:
+            landmark_success_count += 1
         
         # If no valid mask, skip this image
         if mask is None:

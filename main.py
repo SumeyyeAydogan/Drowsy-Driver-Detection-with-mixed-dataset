@@ -43,11 +43,11 @@ if __name__ == "__main__":
     # Training uses the base pipeline and optional GradCAM weights.
     # ============================================================
 
-    GRADCAM_WEIGHTS_FILE = os.path.join(project_root, "artifacts", "reward-landmark-soft","log_weights.json")
+    GRADCAM_WEIGHTS_FILE = os.path.join(project_root, "artifacts", "reward-landmark-soft","exp_weights.json")
     #exp_weights optimized_gradcam_weights
     
     # Create run name based on configuration
-    run_name = "30_epoch_cv"
+    run_name = "30_epoch_cv_exp_weights"
     #run_name = "15_epoch_check-log-reward-landmark-soft"
     
     # 5) Create run manager
@@ -60,6 +60,9 @@ if __name__ == "__main__":
     cv_base_dir = os.path.join(project_root, "dataset")
     print(f"?? CV data directory: {cv_base_dir}")
     print("?? Running cross-validation...")
+    EXP_OUTPUT_PATH = "artifacts/reward-landmark-soft-cv/exp_weights.json"
+    cv_weights_path = os.path.join(project_root, EXP_OUTPUT_PATH)
+    print(f"?? CV weights file: {cv_weights_path}")
     cv_results = cross_validate_model(
         base_dir=cv_base_dir,
         k=5,
@@ -67,16 +70,19 @@ if __name__ == "__main__":
         batch_size=32,
         epochs=30,
         class_names=("NotDrowsy", "Drowsy"),
+        sample_weights_path=cv_weights_path
     )
     print(f"CV results: {cv_results}")
 
     # Save a simple text summary under the current run directory
     cv_summary_path = os.path.join(run_manager.run_dir, "cv_summary.txt")
+    os.makedirs(os.path.dirname(cv_summary_path), exist_ok=True)
     with open(cv_summary_path, "w", encoding="utf-8") as f:
         f.write("Cross-validation summary\n")
         f.write(f"Folds       : {5}\n")
         f.write(f"Epochs/fold : {30}\n")
         f.write(f"Base dir    : {cv_base_dir}\n\n")
+        f.write(f"Weights file: {cv_weights_path}\n\n")
         f.write(f"val_accuracy_mean = {cv_results.get('val_accuracy_mean', float('nan')):.4f}\n")
         f.write(f"val_accuracy_std  = {cv_results.get('val_accuracy_std', float('nan')):.4f}\n")
         f.write(f"val_auc_mean      = {cv_results.get('val_auc_mean', float('nan')):.4f}\n")
@@ -93,7 +99,7 @@ if __name__ == "__main__":
         img_size=(224, 224),
         batch_size=32,
         seed=42,
-        #gradcam_weights_path=GRADCAM_WEIGHTS_FILE
+        gradcam_weights_path=GRADCAM_WEIGHTS_FILE
     )
     
     # Print configuration

@@ -172,27 +172,27 @@ def visualize_eye_mouth_mask_simple(img: Image.Image, alpha=0.4) -> Image.Image:
 
     w, h = img.size
 
-    # ===== ROI Bölge sınırları =====
+    # ===== ROI region bounds =====
     eye_top    = int(h * 0.25)
     eye_bottom = int(h * 0.45)
 
     mouth_top  = int(h * 0.55)
     mouth_bot  = int(h * 0.80)
 
-    # ===== Yarı saydam renk bloğu =====
+    # ===== Semi-transparent color block =====
     overlay_color = (255, 0, 0)
     overlay_eye   = Image.new("RGB", (w, eye_bottom - eye_top), overlay_color)
     overlay_mouth = Image.new("RGB", (w, mouth_bot - mouth_top), overlay_color)
 
-    # ==== TEK KANALLI alpha maskesi =====
+    # ===== Single-channel alpha mask =====
     alpha_val = int(alpha * 255)
     alpha_mask_eye   = Image.new("L", (w, eye_bottom - eye_top), alpha_val)
     alpha_mask_mouth = Image.new("L", (w, mouth_bot - mouth_top), alpha_val)
 
-    # ===== Orijinal resmi kopyala =====
+    # ===== Copy of the original image =====
     out = img.copy()
 
-    # ===== Doğru maskeyle paste et =====
+    # ===== Paste with the correct mask =====
     out.paste(overlay_eye,   (0, eye_top),   alpha_mask_eye)
     out.paste(overlay_mouth, (0, mouth_top), alpha_mask_mouth)
 

@@ -1,7 +1,11 @@
 import numpy as np
 from sklearn.metrics import classification_report, roc_auc_score
 from src.utils import plot_confusion_matrix, plot_roc_curve, plot_precision_recall_curve, save_evaluation_report
-from src.gradcam_analysis import analyze_subjects_gradcam
+from src.gradcam_analysis import (
+    TF_KERAS_VIS_AVAILABLE,
+    analyze_subjects_gradcam,
+    analyze_tf_keras_gradcam,
+)
 import os
 
 def evaluate_model(
@@ -119,14 +123,31 @@ def evaluate_model(
     print("Generating GradCAM visualizations...")
     gradcam_dir = os.path.join(plots_dir, f"{ds_name}_gradcam") if plots_dir else f"{ds_name}_gradcam_results"
     os.makedirs(gradcam_dir, exist_ok=True)
-    analyze_subjects_gradcam(
-        model,
-        test_dir=subject_diverse_dir,
-        num_samples=num_gradcam_samples,
-        output_dir=gradcam_dir,
-        class_names=tuple(class_names),
-        include_buckets=("FP", "FN") if misclassified_only else None
-    )
+    buckets = ("FP", "FN") if misclassified_only else None
+    if subject_diverse_dir:
+        analyze_subjects_gradcam(
+            model,
+            test_dir=subject_diverse_dir,
+            num_samples=num_gradcam_samples,
+            output_dir=gradcam_dir,
+            class_names=tuple(class_names),
+            include_buckets=buckets,
+        )
+    elif TF_KERAS_VIS_AVAILABLE:
+        print("[GradCAM] subject_diverse_dir not set; using tf-keras-vis on val/test dataset.")
+        analyze_tf_keras_gradcam(
+            model,
+            test_ds,
+            num_samples=num_gradcam_samples,
+            output_dir=gradcam_dir,
+            class_names=tuple(class_names),
+            include_buckets=buckets,
+        )
+    else:
+        print(
+            "[GradCAM] Skipped: subject_diverse_dir not set and tf-keras-vis is not installed. "
+            "Install with: pip install tf-keras-vis"
+        )
     
     # 7) Return metrics for further analysis
     return {

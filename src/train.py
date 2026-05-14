@@ -34,7 +34,7 @@ def train_model(model, train_ds, val_ds, epochs=10, callbacks=None, initial_epoc
     """ batch = next(iter(train_ds))
     print([t.shape for t in batch])  # zaten biliyoruz (32, 224,224,3), (32,1), (32,)
 
-    # Tek batch ile dene:
+    # Try with a single batch:
     model.train_on_batch(*batch) """
     # Train model
     history = model.fit(

@@ -10,7 +10,7 @@ project_root = Path(__file__).parent.parent
 sys.path.insert(0, str(project_root))
 
 from src.gradcam import CustomGradCAM
-from src.analysis_pipeline import get_analysis_pipeline
+from src.ds_with_paths_pipeline import get_dataset_with_paths
 from src.focus_metrics import compute_focus_ratio, empirical_right_tail_probability
 from src.mask_helpers import create_landmark_mask
 
@@ -46,7 +46,7 @@ def collect_focus_ratios(model, data_dir, img_size):
     """
     gradcam = CustomGradCAM(model)
 
-    ds, file_paths = get_analysis_pipeline(data_dir, img_size)
+    ds, file_paths = get_dataset_with_paths(data_dir, img_size)
 
     ratios = []
     face_ok = 0
@@ -118,7 +118,7 @@ def plot_focus_ratio_by_model(results_dict, dataset_name, output_path):
     x_min = float(np.min(all_vals))
     x_max = float(np.max(all_vals))
 
-    # İstersen sabitle:
+    # Optionally pin axis range:
     # x_min, x_max = 0.0, 1.0
 
     # ---------- 2) SAME BINS ----------

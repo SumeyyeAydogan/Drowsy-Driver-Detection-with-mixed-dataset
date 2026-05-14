@@ -9,7 +9,7 @@ project_root = Path(__file__).parent.parent
 sys.path.insert(0, str(project_root))
 
 from src.gradcam import CustomGradCAM
-from src.analysis_pipeline import get_analysis_pipeline
+from src.ds_with_paths_pipeline import get_analysis_pipeline
 from src.focus_metrics import compute_focus_ratio
 from src.mask_helpers import create_landmark_mask
 
@@ -138,16 +138,16 @@ def plot_focus_ratio_by_confusion_matrix(y_true, y_pred, focus_ratios, model_nam
     groups = get_confusion_matrix_groups(y_true, y_pred)
     focus_ratios = np.array(focus_ratios, dtype=np.float32)
 
-    # ---- Guard: hiç sample yoksa ----
+    # ---- Guard: no samples ----
     if focus_ratios.size == 0:
         print("[WARN] No focus ratios to plot. Skipping histogram.")
         return
 
     # ---- Shared X range ----
-    # Focus ratio teorik olarak [0, 1]. En temiz karşılaştırma:
+    # Focus ratio is in [0, 1] in theory; fixed [0,1] range is the cleanest comparison:
     x_min, x_max = 0.0, 1.0
 
-    # Eğer illa dataya göre belirlemek istersen:
+    # If you prefer limits driven purely by the data instead:
     # x_min = float(np.min(focus_ratios))
     # x_max = float(np.max(focus_ratios))
     # if np.isclose(x_min, x_max):
@@ -166,7 +166,7 @@ def plot_focus_ratio_by_confusion_matrix(y_true, y_pred, focus_ratios, model_nam
             continue
         vals = focus_ratios[idxs]
 
-        # Clamp (olur da sayısal taşma vs varsa)
+        # Clamp (numeric edge cases / overflow)
         vals = np.clip(vals, x_min, x_max)
 
         hist, _ = np.histogram(vals, bins=bins, density=True)
@@ -189,7 +189,7 @@ def plot_focus_ratio_by_confusion_matrix(y_true, y_pred, focus_ratios, model_nam
         ax = axes[row, col]
         indices = groups[group_name]
 
-        # Ortak eksen limitleri (HER subplot için)
+        # Shared axis limits (every subplot)
         ax.set_xlim(x_min, x_max)
         ax.set_ylim(0, y_max)
 

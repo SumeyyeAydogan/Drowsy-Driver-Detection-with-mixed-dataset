@@ -192,7 +192,7 @@ def main():
     label_fg = ImageColor.getrgb(LABEL_FG)
     extensions = [e.lower() if e.startswith(".") else f".{e.lower()}" for e in EXTENSIONS]
 
-    # GradCAM dosyalarını indeksle
+    # Index GradCAM files
     run_indexes: Dict[RunSpec, Dict[str, Path]] = {}
     for run in RUN_SPECS:
         run_indexes[run] = collect_gradcam_index(run, GRADCAM_ROOTS, extensions, MATCH_MODE, VERBOSE)

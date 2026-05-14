@@ -116,7 +116,7 @@ def generate_combined_gradcam(img_path):
 # 6) CREATE COMPARATIVE GRADCAM PANEL (VERTICAL)
 # ---------------------------------------------------------
 def combine_vertical(img_paths):
-    """Verilen dosya yollarını dikey (üst–alt) birleştirir."""
+    """Stack images at the given paths vertically (top to bottom)."""
     imgs = [Image.open(p).convert("RGB") for p in img_paths]
 
     w = max(img.width for img in imgs)

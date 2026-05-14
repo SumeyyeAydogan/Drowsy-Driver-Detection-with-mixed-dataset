@@ -34,9 +34,9 @@ PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 DATASET_ROOT = os.path.join(PROJECT_ROOT, "splitted_dataset")
 class_name = "Drowsy"
 TEST_DIR = os.path.join(DATASET_ROOT, "test", class_name)
-SUBJECT_ONLY = "ZC" #"m" "zc" "ZC" "D" "d" "h" "w" "M" # Only files beginning with this prefix will be processed  a e u
+SUBJECT_ONLY = "D" #"m" "zc" "ZC" "D" "d" "h" "w" "M" # Only files beginning with this prefix will be processed  a e u
 # "vertical_rectangles"  "original" "bottom_left" "top"
-mask_shape = "eyes_mouth"
+mask_shape = "simple-eye_mouth-visualize"
 OUTPUT_DIR = os.path.join(PROJECT_ROOT, "masked_test", mask_shape, class_name, f"{SUBJECT_ONLY}")
 MAX_IMAGES = 5  # Set to an integer to limit number of processed images
 
@@ -162,6 +162,42 @@ def apply_full_blackout(img: Image.Image) -> Image.Image:
         img = img.convert("RGB")
     w, h = img.size
     return Image.new("RGB", (w, h), color=(0, 0, 0))
+
+import numpy as np
+
+def visualize_eye_mouth_mask_simple(img: Image.Image, alpha=0.4) -> Image.Image:
+    """Overlay eye + mouth ROI using simple paste blocks (no draw)."""
+    if img.mode != "RGB":
+        img = img.convert("RGB")
+
+    w, h = img.size
+
+    # ===== ROI region bounds =====
+    eye_top    = int(h * 0.25)
+    eye_bottom = int(h * 0.45)
+
+    mouth_top  = int(h * 0.55)
+    mouth_bot  = int(h * 0.80)
+
+    # ===== Semi-transparent color block =====
+    overlay_color = (255, 0, 0)
+    overlay_eye   = Image.new("RGB", (w, eye_bottom - eye_top), overlay_color)
+    overlay_mouth = Image.new("RGB", (w, mouth_bot - mouth_top), overlay_color)
+
+    # ===== Single-channel alpha mask =====
+    alpha_val = int(alpha * 255)
+    alpha_mask_eye   = Image.new("L", (w, eye_bottom - eye_top), alpha_val)
+    alpha_mask_mouth = Image.new("L", (w, mouth_bot - mouth_top), alpha_val)
+
+    # ===== Copy of the original image =====
+    out = img.copy()
+
+    # ===== Paste with the correct mask =====
+    out.paste(overlay_eye,   (0, eye_top),   alpha_mask_eye)
+    out.paste(overlay_mouth, (0, mouth_top), alpha_mask_mouth)
+
+    return out
+
 
 def apply_eye_mouth_only_mask(img: Image.Image, use_mean_fill: bool = False, use_soft_mask: bool = False, alpha: float = 0.2) -> Image.Image:
     """Keep only eye and mouth regions visible, black out everything else.
@@ -291,7 +327,8 @@ def main() -> None:
             img = Image.open(path)
             # Use two-rectangle bottom corners mask with different ratios
             # For testing: change to apply_full_blackout(img) to test with completely black image
-            masked = apply_eye_mouth_only_mask(img, use_soft_mask=True, alpha=0.2)
+            masked = visualize_eye_mouth_mask_simple(img, alpha=0.7)
+            #apply_eye_mouth_only_mask(img, use_soft_mask=True, alpha=0.2)
             #apply_vertical_rectangles_mask(img, WIDTH_RATIO, HEIGHT_RATIO) apply_no_mask(img) apply_bottom_left_mask(img, RATIO)
             #apply_eye_mouth_only_mask(img)
             out_path = make_out_path(path)

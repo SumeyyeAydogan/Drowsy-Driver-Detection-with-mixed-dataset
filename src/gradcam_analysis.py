@@ -186,8 +186,9 @@ def analyze_tf_keras_gradcam(
         else:
             raise ValueError(f"Unexpected batch structure: {type(batch)}")
 
+        y_flat = np.ravel(batch_labels.numpy())
         for i in range(len(batch_images)):
-            all_samples.append((batch_images[i].numpy(), int(batch_labels[i].numpy())))
+            all_samples.append((batch_images[i].numpy(), int(y_flat[i])))
     
     random.seed(seed)
     random.shuffle(all_samples)

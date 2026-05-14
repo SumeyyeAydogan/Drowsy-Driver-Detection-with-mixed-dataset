@@ -4,14 +4,15 @@ import tensorflow as tf
 from pathlib import Path
 import matplotlib.pyplot as plt
 from datetime import datetime
-from PIL import Image, ImageDraw
-import mediapipe as mp
 
 # Add root path
 project_root = Path(__file__).parent.parent
 sys.path.insert(0, str(project_root))
 
 from src.gradcam import CustomGradCAM
+from src.ds_with_paths_pipeline import get_dataset_with_paths
+from src.focus_metrics import compute_focus_ratio, empirical_right_tail_probability
+from src.mask_helpers import create_landmark_mask
 
 
 # ================== CONFIG ======================
@@ -33,62 +34,7 @@ MODEL_CONFIGS = [
     {"label": "exp-reward", "model_path": r"runs/30_epoch_exp-reward-landmark-soft/models/final_model.h5"},
 ]
 
-# ================== MediaPipe FaceMesh ======================
-mp_face_mesh = mp.solutions.face_mesh.FaceMesh(
-    static_image_mode=True,
-    max_num_faces=1,
-    refine_landmarks=True,
-    min_detection_confidence=0.5,
-)
-
-LEFT_EYE_IDX  = [33, 7, 163, 144, 145, 153, 154, 155, 133]
-RIGHT_EYE_IDX = [263, 249, 390, 373, 374, 380, 381, 382, 362]
-MOUTH_IDX     = [78, 191, 80, 81, 82, 13, 312, 311, 310, 415, 308]
-ROI_IDX = LEFT_EYE_IDX + RIGHT_EYE_IDX + MOUTH_IDX
-
-
 # ================== MASK + FOCUS ======================
-def create_landmark_mask(image_np_uint8, img_size):
-    """
-    image_np_uint8: (H,W,3) RGB uint8 at img_size
-    returns: (H,W) float32 mask in [0,1] or None if no face
-    """
-    h, w = img_size
-    background_value = float(CONFIG.get("background_mask_value", 0.0))
-
-    results = mp_face_mesh.process(image_np_uint8)
-    if not results.multi_face_landmarks:
-        return None
-
-    face = results.multi_face_landmarks[0]
-
-    bg_pil_value = int(background_value * 255)
-    pil_mask = Image.new("L", (w, h), bg_pil_value)
-    draw = ImageDraw.Draw(pil_mask)
-
-    box_half_size = int(CONFIG["landmark_box_half_size"])
-    for i in ROI_IDX:
-        lm = face.landmark[i]
-        cx = int(lm.x * w)
-        cy = int(lm.y * h)
-        x0 = max(0, cx - box_half_size)
-        y0 = max(0, cy - box_half_size)
-        x1 = min(w - 1, cx + box_half_size)
-        y1 = min(h - 1, cy + box_half_size)
-        draw.rectangle([x0, y0, x1, y1], outline=255, fill=255)
-
-    mask = np.array(pil_mask, dtype=np.float32) / 255.0
-    return mask
-
-
-def compute_focus_ratio(heatmap, mask):
-    heatmap = np.maximum(heatmap, 0)
-    mx = float(heatmap.max())
-    if mx > 0:
-        heatmap = heatmap / (mx + 1e-8)
-    focus = float(np.sum(heatmap * mask))
-    total = float(np.sum(heatmap) + 1e-8)
-    return focus / total
 
 
 # ================== CORE ======================
@@ -100,19 +46,7 @@ def collect_focus_ratios(model, data_dir, img_size):
     """
     gradcam = CustomGradCAM(model)
 
-    ds = tf.keras.utils.image_dataset_from_directory(
-        data_dir,
-        labels="inferred",
-        label_mode="binary",
-        class_names=["NotDrowsy", "Drowsy"],  # NotDrowsy=0, Drowsy=1
-        image_size=img_size,
-        batch_size=1,
-        shuffle=False
-    )
-    file_paths = list(getattr(ds, "file_paths", []))
-    path_ds = tf.data.Dataset.from_tensor_slices(file_paths).batch(1)
-    ds = tf.data.Dataset.zip((ds, path_ds))
-    ds = ds.apply(tf.data.experimental.ignore_errors())
+    ds, file_paths = get_dataset_with_paths(data_dir, img_size)
 
     ratios = []
     face_ok = 0
@@ -141,7 +75,12 @@ def collect_focus_ratios(model, data_dir, img_size):
             antialias=True
         ).numpy()[..., 0]
 
-        mask = create_landmark_mask(image_uint8, img_size)
+        mask = create_landmark_mask(
+            image_uint8,
+            img_size,
+            background_value=float(CONFIG.get("background_mask_value", 0.0)),
+            landmark_box_half_size=int(CONFIG.get("landmark_box_half_size", 12)),
+        )
         if mask is None:
             pass
         else:
@@ -179,7 +118,7 @@ def plot_focus_ratio_by_model(results_dict, dataset_name, output_path):
     x_min = float(np.min(all_vals))
     x_max = float(np.max(all_vals))
 
-    # İstersen sabitle:
+    # Optionally pin axis range:
     # x_min, x_max = 0.0, 1.0
 
     # ---------- 2) SAME BINS ----------
@@ -376,7 +315,7 @@ if __name__ == "__main__":
     # "Integral" == P(focus > T)
     # Baseline P(focus > T)
     baseline_ratios = ratios_by_model["orijinal"]
-    P_baseline = float(np.mean(baseline_ratios > T))
+    P_baseline = empirical_right_tail_probability(baseline_ratios, T)
 
     summary_rows = []
 
@@ -384,8 +323,8 @@ if __name__ == "__main__":
         if len(ratios) == 0:
             continue
 
-        p_above = float(np.mean(ratios > T))
-        delta_p = p_above - P_baseline   # <<< YENİ METRİK
+        p_above = empirical_right_tail_probability(ratios, T)
+        delta_p = p_above - P_baseline
 
         mean_v = float(np.mean(ratios))
         med_v = float(np.median(ratios))
